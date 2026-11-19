@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ריצה והליכה</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ריצה והליכה">
+<link rel="apple-touch-icon" href="icons/icon-512-maskable.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;600;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- מסך הגדרות -->
+<section id="setup" class="screen active">
+  <header class="top">
+    <h1>🏃 ריצה והליכה</h1>
+    <p class="sub">מגדירים, לוחצים התחלה, ומקשיבים לאוזניות</p>
+  </header>
+
+  <div class="presets" id="presets"></div>
+
+  <div class="card">
+    <div class="row run">
+      <div class="lbl">🏃 ריצה</div>
+      <div class="stepper" data-key="run"></div>
+    </div>
+    <div class="row walk">
+      <div class="lbl">🚶 הליכה</div>
+      <div class="stepper" data-key="walk"></div>
+    </div>
+    <div class="row">
+      <div class="lbl">🔁 סיבובים</div>
+      <div class="stepper" data-key="rounds"></div>
+    </div>
+  </div>
+
+  <details class="card more">
+    <summary>⚙️ הגדרות נוספות</summary>
+    <div class="row">
+      <div class="lbl">חימום בהליכה</div>
+      <div class="stepper" data-key="warmup"></div>
+    </div>
+    <div class="row">
+      <div class="lbl">שחרור בהליכה</div>
+      <div class="stepper" data-key="cooldown"></div>
+    </div>
+    <label class="tgl"><input type="checkbox" id="cue-half"> הכרזה באמצע כל קטע ("חצי עבר")</label>
+    <label class="tgl"><input type="checkbox" id="cue-min"> הכרזה "עוד דקה" לפני סוף קטע</label>
+    <label class="tgl"><input type="checkbox" id="cue-count"> צפצופים ב-3 השניות האחרונות</label>
+    <label class="tgl"><input type="checkbox" id="cue-round"> להגיד "סיבוב X מתוך Y"</label>
+    <label class="tgl"><input type="checkbox" id="cue-vibe"> רטט בכל החלפה</label>
+    <div class="row">
+      <div class="lbl">עוצמת הקול</div>
+      <input type="range" id="volume" min="0.3" max="1" step="0.1">
+    </div>
+    <div class="row">
+      <div class="lbl">מהירות דיבור</div>
+      <input type="range" id="rate" min="0.7" max="1.4" step="0.1">
+    </div>
+    <button class="btn ghost" id="test-voice">🔊 בדיקת קול</button>
+    <p class="hint" id="voice-hint"></p>
+  </details>
+
+  <div class="total" id="total"></div>
+  <button class="btn go" id="start">▶ התחלה</button>
+  <button class="btn ghost small" id="save-preset">⭐ שמירה כתוכנית קבועה</button>
+  <p class="hint" id="install-hint"></p>
+</section>
+
+<!-- מסך ריצה -->
+<section id="run" class="screen">
+  <div class="phase" id="phase">ריצה</div>
+  <div class="clock" id="clock">5:00</div>
+  <div class="next" id="next"></div>
+  <div class="bar"><div id="seg-bar"></div></div>
+  <div class="stats">
+    <div><span id="round">1/6</span><small>סיבוב</small></div>
+    <div><span id="elapsed">0:00</span><small>עבר</small></div>
+    <div><span id="left">36:00</span><small>נשאר</small></div>
+  </div>
+  <div class="bar total-bar"><div id="all-bar"></div></div>
+  <div class="ctrls">
+    <button class="btn ghost" id="skip">⏭ דילוג</button>
+    <button class="btn pause" id="pause">⏸ הפסקה</button>
+  </div>
+  <button class="btn stop" id="stop">⏹ סיום</button>
+  <p class="hint lock">אפשר לנעול את המסך ולשים בכיס 🎧</p>
+</section>
+
+<!-- מסך סיכום -->
+<section id="done" class="screen">
+  <div class="trophy">🏆</div>
+  <h2 id="done-title">כל הכבוד!</h2>
+  <div class="card summary" id="summary"></div>
+  <button class="btn go" id="again">חזרה להגדרות</button>
+  <h3 class="hist-h">ריצות אחרונות</h3>
+  <ul class="history" id="history"></ul>
+</section>
+
+<script src="app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+</script>
+</body>
+</html>
