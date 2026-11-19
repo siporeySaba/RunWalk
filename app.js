@@ -11,7 +11,7 @@ const store = {
 const DEFAULTS = {
   mode: 'fixed', run: 300, walk: 60, rounds: 6, custom: '3, 5, 7, 5, 3', warmup: 0, cooldown: 0,
   half: false, min: true, count: true, round: true, vibe: true, cheer: true,
-  voice: 'avri', music: false, volume: 1, showProg: true
+  voice: 'avri', music: false, volume: 1, showProg: true, gps: false
 };
 const cfg = Object.assign({}, DEFAULTS, store.get('rw.cfg', {}));
 
@@ -157,7 +157,7 @@ function paintSetup() {
   document.body.classList.toggle('custom-mode', cfg.mode === 'custom');
   if (document.activeElement !== $('custom')) $('custom').value = cfg.custom;
 }
-const TOGGLES = { 'cue-half': 'half', 'cue-min': 'min', 'cue-count': 'count', 'cue-round': 'round', 'cue-vibe': 'vibe', 'cue-cheer': 'cheer', 'music': 'music' };
+const TOGGLES = { 'cue-half': 'half', 'cue-min': 'min', 'cue-count': 'count', 'cue-round': 'round', 'cue-vibe': 'vibe', 'cue-cheer': 'cheer', 'music': 'music', 'cue-gps': 'gps' };
 function bindSettings() {
   for (const [id, k] of Object.entries(TOGGLES)) {
     $(id).checked = cfg[k];
@@ -458,6 +458,7 @@ async function start() {
   wakeLock();
   clearInterval(W.timer); W.timer = setInterval(tick, 250);
   tick();
+  if (cfg.gps && window.RW_GPS) RW_GPS.start({ getSeg: () => W.idx, isPaused: () => !!W.pausedAt, onKm: km => say(['km' + km]) });
   if (!cfg.music && 'mediaSession' in navigator) {
     try {
       navigator.mediaSession.setActionHandler('pause', togglePause);
@@ -500,6 +501,7 @@ function finish(completed) {
     runSec += part; if (part >= s.dur) { roundsDone++; maxSeg = Math.max(maxSeg, s.dur); }
   });
   runSec = Math.round(runSec);
+  const gps = cfg.gps && window.RW_GPS ? (RW_GPS.stop(), RW_GPS.result(W.segs, runSec)) : null;
 
   const h = store.get('rw.history', []);
   const prev = bests(h);
@@ -519,7 +521,7 @@ function finish(completed) {
   document.body.className = ''; document.title = 'ריצה והליכה';
 
   if (e > 30) {
-    h.unshift({ at: Date.now(), total: Math.round(e), run: runSec, rounds: roundsDone, of: W.n, plan: planLabel(W.plan), done: completed, maxSeg });
+    h.unshift({ at: Date.now(), total: Math.round(e), run: runSec, rounds: roundsDone, of: W.n, plan: planLabel(W.plan), done: completed, maxSeg, dist: gps ? Math.round(gps.dist) : undefined });
     store.set('rw.history', h.slice(0, 300));
   }
   $('done-title').textContent = completed ? 'כל הכבוד! 🎉' : 'האימון נעצר';
@@ -530,7 +532,10 @@ function finish(completed) {
     <div class="row"><span>זמן כולל</span><b>${fmt(e)}</b></div>
     <div class="row"><span>זמן ריצה</span><b>${fmt(runSec)}</b></div>
     <div class="row"><span>סיבובים שהושלמו</span><b>${roundsDone} מתוך ${W.n}</b></div>
-    <div class="row"><span>תוכנית</span><b>${planLabel(W.plan)}</b></div>`;
+    <div class="row"><span>תוכנית</span><b>${planLabel(W.plan)}</b></div>
+    ${gps ? (gps.fixes ? `<div class="row"><span>📍 מרחק</span><b>${RW_GPS.km(gps.dist)} ק״מ</b></div>
+      <div class="row"><span>📍 קצב ממוצע בריצה</span><b>${RW_GPS.pace(gps.pace)}</b></div>`
+      : '<div class="row"><span>📍 GPS</span><b>לא התקבלה קליטה</b></div>') : ''}`;
   paintHistory(); paintStats(); paintProgCard();
   show('done');
 }

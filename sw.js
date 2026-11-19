@@ -1,6 +1,6 @@
-const CACHE = 'runwalk-v2';
+const CACHE = 'runwalk-v3';
 const CLIP_CACHE = 'runwalk-clips-v1'; // הקלטות הקול – נשמרות גם בין עדכונים
-const SHELL = ['./', './index.html', './style.css', './app.js', './clips.js', './manifest.json',
+const SHELL = ['./', './index.html', './style.css', './app.js', './clips.js', './gps.js', './manifest.json',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-512-maskable.png'];
 
 self.addEventListener('install', e => {
