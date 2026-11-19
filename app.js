@@ -2,35 +2,51 @@
 /* ===== ריצה והליכה – טיימר אינטרוולים עם הכרזות קוליות ===== */
 
 const $ = id => document.getElementById(id);
+const { CLIPS, heb } = window.RW_CLIPS;
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 };
 
 const DEFAULTS = {
-  run: 300, walk: 60, rounds: 6, warmup: 0, cooldown: 0,
-  half: false, min: true, count: true, round: true, vibe: true, volume: 1, rate: 1
+  mode: 'fixed', run: 300, walk: 60, rounds: 6, custom: '3, 5, 7, 5, 3', warmup: 0, cooldown: 0,
+  half: false, min: true, count: true, round: true, vibe: true, cheer: true,
+  voice: 'avri', music: false, volume: 1, showProg: true
 };
 const cfg = Object.assign({}, DEFAULTS, store.get('rw.cfg', {}));
 
 const BUILTIN = [
-  { run: 300, walk: 60, rounds: 6 },
-  { run: 180, walk: 60, rounds: 8 },
-  { run: 120, walk: 60, rounds: 10 },
-  { run: 60, walk: 60, rounds: 10 },
-  { run: 480, walk: 120, rounds: 4 },
+  { mode: 'fixed', run: 300, walk: 60, rounds: 6 },
+  { mode: 'fixed', run: 180, walk: 60, rounds: 8 },
+  { mode: 'custom', custom: '2, 3, 4, 5, 4, 3, 2', walk: 60 },
+  { mode: 'fixed', run: 120, walk: 60, rounds: 10 },
+  { mode: 'fixed', run: 480, walk: 120, rounds: 4 },
 ];
 
-/* ---------- מספרים ומילים בעברית ---------- */
-const ONES = ['', 'אחת', 'שתיים', 'שלוש', 'ארבע', 'חמש', 'שש', 'שבע', 'שמונה', 'תשע'];
-const TENS = ['', 'עשר', 'עשרים', 'שלושים', 'ארבעים', 'חמישים', 'שישים', 'שבעים', 'שמונים', 'תשעים'];
-function heb(n) {
-  if (n < 10) return ONES[n];
-  if (n === 10) return 'עשר';
-  if (n < 20) return (n === 12 ? 'שתים' : ONES[n - 10]) + ' עשרה';
-  if (n < 100) { const t = TENS[Math.floor(n / 10)], o = n % 10; return o ? t + ' ו' + ONES[o] : t; }
-  return String(n);
+/* ---------- תוכנית התקדמות: 8 שבועות עד 30 דקות ריצה רצופה ---------- */
+const F = (run, rounds, walk = 60) => ({ mode: 'fixed', run: run * 60, walk, rounds });
+const C = (list, walk = 60) => ({ mode: 'custom', custom: list, walk });
+const PROGRAM = [
+  [F(4, 6), F(5, 5), F(5, 6)],
+  [F(6, 5), C('4, 6, 8, 6, 4'), F(7, 4)],
+  [F(8, 4), C('5, 7, 9, 7, 5'), F(8, 4)],
+  [F(10, 3), C('8, 10, 12'), F(10, 3)],
+  [F(12, 3), C('10, 15, 10'), F(13, 3)],
+  [F(15, 2), C('12, 15, 12'), F(17, 2)],
+  [C('20, 10'), F(18, 2), C('22, 12')],
+  [C('25, 5'), C('20, 10'), F(30, 1)],
+];
+const progId = (w, s) => `w${w}s${s}`;
+let prog = store.get('rw.prog', { done: {} });
+function nextSession() {
+  for (let w = 0; w < PROGRAM.length; w++)
+    for (let s = 0; s < PROGRAM[w].length; s++)
+      if (!prog.done[progId(w, s)]) return { w, s, plan: PROGRAM[w][s] };
+  return null;
 }
+const progCount = () => PROGRAM.reduce((a, w) => a + w.length, 0);
+
+/* ---------- מספרים ומילים ---------- */
 function minWords(m) { return m === 1 ? 'דקה' : m === 2 ? 'שתי דקות' : heb(m) + ' דקות'; }
 function secWords(s) { return s === 1 ? 'שנייה' : s === 2 ? 'שתי שניות' : heb(s) + ' שניות'; }
 function durWords(sec) {
@@ -39,6 +55,16 @@ function durWords(sec) {
   if (!s) return m === 1 ? 'דקה אחת' : minWords(m);
   if (s === 30) return minWords(m) + ' וחצי';
   return minWords(m) + ' ו' + secWords(s);
+}
+// מפתחות ההקלטות למשך זמן. '#' = טקסט חופשי (יוקרא בקול הטלפון)
+function durKeys(sec) {
+  sec = Math.max(15, Math.round(sec / 15) * 15);
+  const m = Math.floor(sec / 60), s = sec % 60;
+  if (m > 90) return ['#' + durWords(sec)];
+  if (!m) return ['s' + s];
+  if (!s) return ['m' + m];
+  if (s === 30 && m <= 30) return ['m' + m + 'h'];
+  return ['m' + m, 'and_s' + s];
 }
 function fmt(sec) {
   sec = Math.max(0, Math.ceil(sec));
@@ -49,6 +75,46 @@ function fmtShort(sec) {
   if (sec < 60) return sec + ' שנ׳';
   if (sec % 60 === 0) return sec / 60 + ' דק׳';
   return fmt(sec);
+}
+const fmtMin = sec => String(+(sec / 60).toFixed(2));
+
+/* ---------- תוכנית האימון ---------- */
+function parseCustom(str) {
+  const a = String(str || '').split(/[,\s،;]+/).map(x => parseFloat(x)).filter(x => x > 0)
+    .map(x => Math.round(Math.min(60, Math.max(0.25, x)) * 4) * 15);
+  return a.slice(0, 40);
+}
+function runsOf(c) {
+  if (c.mode === 'custom') { const a = parseCustom(c.custom); return a.length ? a : [c.run || 300]; }
+  return Array(c.rounds).fill(c.run);
+}
+function planLabel(p) {
+  if (p.mode === 'custom') return `ריצות ${runsOf(p).map(fmtMin).join('-')} · הליכה ${fmtShort(p.walk)}`;
+  return `${fmtShort(p.run)} / ${fmtShort(p.walk)} × ${p.rounds}`;
+}
+const samePlan = (a, b) => planLabel(a) === planLabel(b);
+const planOf = c => c.mode === 'custom'
+  ? { mode: 'custom', custom: c.custom, walk: c.walk }
+  : { mode: 'fixed', run: c.run, walk: c.walk, rounds: c.rounds };
+function applyPlan(p) {
+  cfg.mode = p.mode || 'fixed'; cfg.walk = p.walk;
+  if (cfg.mode === 'custom') cfg.custom = p.custom; else { cfg.run = p.run; cfg.rounds = p.rounds; }
+  if ('warmup' in p) { cfg.warmup = p.warmup || 0; cfg.cooldown = p.cooldown || 0; }
+  paintSetup(); saveCfg();
+}
+
+function buildSegments(c) {
+  const runs = runsOf(c), n = runs.length, s = [];
+  if (c.warmup) s.push({ kind: 'easy', label: 'חימום', dur: c.warmup });
+  runs.forEach((dur, k) => {
+    const r = k + 1;
+    s.push({ kind: 'run', label: 'ריצה', dur, round: r });
+    // אחרי הריצה האחרונה: אם יש שחרור – הוא מחליף את ההליכה
+    if (r < n || !c.cooldown) s.push({ kind: 'walk', label: 'הליכה', dur: c.walk, round: r });
+  });
+  if (c.cooldown) s.push({ kind: 'easy', label: 'שחרור', dur: c.cooldown });
+  let t = 0; s.forEach(x => { x.start = t; t += x.dur; });
+  return s;
 }
 
 /* ---------- מסך ההגדרות ---------- */
@@ -70,12 +136,11 @@ function buildSteppers() {
     const key = el.dataset.key, st = STEP[key];
     el.innerHTML = '<button aria-label="פחות">−</button><span class="val"></span><button aria-label="יותר">+</button>';
     const [minus, val, plus] = el.children;
-    const paint = () => { val.textContent = showVal(key); };
     const change = dir => {
       const v = cfg[key];
       const step = dir > 0 ? st.step(v) : st.step(v - 1);
       cfg[key] = Math.min(st.max, Math.max(st.min, v + dir * step));
-      paint(); saveCfg();
+      val.textContent = showVal(key); saveCfg();
     };
     // לחיצה ארוכה מחליפה מהר
     [[minus, -1], [plus, 1]].forEach(([b, d]) => {
@@ -84,68 +149,114 @@ function buildSteppers() {
       b.addEventListener('pointerdown', e => { e.preventDefault(); change(d); t1 = setTimeout(() => { t2 = setInterval(() => change(d), 110); }, 450); });
       ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, stopRep));
     });
-    paint();
   });
 }
-const TOGGLES = { 'cue-half': 'half', 'cue-min': 'min', 'cue-count': 'count', 'cue-round': 'round', 'cue-vibe': 'vibe' };
+function paintSetup() {
+  document.querySelectorAll('.stepper').forEach(el => { el.querySelector('.val').textContent = showVal(el.dataset.key); });
+  document.querySelectorAll('#mode button').forEach(b => b.classList.toggle('on', b.dataset.m === cfg.mode));
+  document.body.classList.toggle('custom-mode', cfg.mode === 'custom');
+  if (document.activeElement !== $('custom')) $('custom').value = cfg.custom;
+}
+const TOGGLES = { 'cue-half': 'half', 'cue-min': 'min', 'cue-count': 'count', 'cue-round': 'round', 'cue-vibe': 'vibe', 'cue-cheer': 'cheer', 'music': 'music' };
 function bindSettings() {
   for (const [id, k] of Object.entries(TOGGLES)) {
     $(id).checked = cfg[k];
     $(id).addEventListener('change', () => { cfg[k] = $(id).checked; saveCfg(); });
   }
-  ['volume', 'rate'].forEach(k => {
-    $(k).value = cfg[k];
-    $(k).addEventListener('input', () => { cfg[k] = +$(k).value; saveCfg(); });
-  });
-  $('test-voice').addEventListener('click', () => { audio.unlock(); speak('עכשיו ריצה, ' + durWords(cfg.run)); });
+  $('volume').value = cfg.volume;
+  $('volume').addEventListener('input', () => { cfg.volume = +$('volume').value; saveCfg(); });
+  $('voice').value = cfg.voice;
+  $('voice').addEventListener('change', () => { cfg.voice = $('voice').value; saveCfg(); voiceHint(); prefetchVoice(); });
+  $('test-voice').addEventListener('click', () => { audio.unlock(); say(['test']); });
+  document.querySelectorAll('#mode button').forEach(b => b.addEventListener('click', () => { cfg.mode = b.dataset.m; paintSetup(); saveCfg(); }));
+  $('custom').addEventListener('input', () => { cfg.custom = $('custom').value; saveCfg(); });
+  $('custom').addEventListener('blur', () => { const a = parseCustom(cfg.custom); if (a.length) { cfg.custom = a.map(fmtMin).join(', '); paintSetup(); saveCfg(); } });
 }
-function saveCfg() { store.set('rw.cfg', cfg); paintTotal(); paintPresets(); }
+function saveCfg() { store.set('rw.cfg', cfg); paintTotal(); paintPresets(); paintProgCard(); }
 function paintTotal() {
   const segs = buildSegments(cfg);
   const total = segs.reduce((a, s) => a + s.dur, 0);
-  const run = cfg.run * cfg.rounds;
+  const run = runsOf(cfg).reduce((a, b) => a + b, 0);
   $('total').innerHTML = `סה״כ <b>${fmt(total)}</b> · מתוכן ריצה <b>${fmt(run)}</b>`;
 }
 
 /* ---------- תוכניות שמורות ---------- */
 let userPresets = store.get('rw.presets', []);
-const samePlan = (a, b) => a.run === b.run && a.walk === b.walk && a.rounds === b.rounds;
-function presetLabel(p) { return `${fmtShort(p.run)} / ${fmtShort(p.walk)} × ${p.rounds}`; }
 function paintPresets() {
   const box = $('presets'); box.innerHTML = '';
   const all = [...userPresets.map(p => ({ ...p, user: true })), ...BUILTIN.filter(b => !userPresets.some(u => samePlan(u, b)))];
   all.forEach(p => {
     const b = document.createElement('button');
     b.className = 'preset' + (samePlan(p, cfg) ? ' on' : '');
-    b.innerHTML = (p.user ? '⭐ ' : '') + presetLabel(p) + (p.user ? '<span class="x" title="מחיקה">✕</span>' : '');
+    b.innerHTML = (p.user ? '⭐ ' : '') + planLabel(p) + (p.user ? '<span class="x" title="מחיקה">✕</span>' : '');
     b.addEventListener('click', e => {
       if (e.target.classList.contains('x')) {
-        userPresets = userPresets.filter(u => !samePlan(u, p)); store.set('rw.presets', userPresets);
-      } else {
-        Object.assign(cfg, { run: p.run, walk: p.walk, rounds: p.rounds });
-        if (p.user) Object.assign(cfg, { warmup: p.warmup || 0, cooldown: p.cooldown || 0 });
-        buildSteppers();
-      }
-      saveCfg();
+        userPresets = userPresets.filter(u => !samePlan(u, p)); store.set('rw.presets', userPresets); saveCfg();
+      } else applyPlan(p);
     });
     box.appendChild(b);
   });
 }
 $('save-preset').addEventListener('click', () => {
-  const p = { run: cfg.run, walk: cfg.walk, rounds: cfg.rounds, warmup: cfg.warmup, cooldown: cfg.cooldown };
+  const p = { ...planOf(cfg), warmup: cfg.warmup, cooldown: cfg.cooldown };
   userPresets = [p, ...userPresets.filter(u => !samePlan(u, p))].slice(0, 8);
   store.set('rw.presets', userPresets); paintPresets();
   $('save-preset').textContent = '✓ נשמר';
   setTimeout(() => { $('save-preset').textContent = '⭐ שמירה כתוכנית קבועה'; }, 1500);
 });
 
+/* ---------- תוכנית ההתקדמות: כרטיס ומסך ---------- */
+function paintProgCard() {
+  const box = $('prog-card');
+  if (!cfg.showProg) { box.innerHTML = '<button class="btn ghost small" id="prog-show">📅 תוכנית התקדמות ל-30 דקות ריצה</button>'; $('prog-show').onclick = () => { cfg.showProg = true; saveCfg(); }; return; }
+  const nx = nextSession(), done = Object.keys(prog.done).length, all = progCount();
+  box.innerHTML = `<div class="card prog">
+    <div class="prog-h">📅 התוכנית: 30 דקות ריצה רצופה <span>${done}/${all}</span></div>
+    <div class="prog-bar"><div style="width:${100 * done / all}%"></div></div>
+    ${nx ? `<div class="prog-next">האימון הבא: <b>שבוע ${nx.w + 1} · אימון ${nx.s + 1}</b><br>${planLabel(nx.plan)}${samePlan(nx.plan, cfg) ? ' <span class="ok">✓ נטען</span>' : ''}</div>`
+        : '<div class="prog-next">🏆 סיימת את כל התוכנית! כל הכבוד!</div>'}
+    <div class="prog-btns">
+      ${nx && !samePlan(nx.plan, cfg) ? '<button class="btn small" id="prog-load">לטעון את האימון</button>' : ''}
+      <button class="btn ghost small" id="prog-all">כל התוכנית</button>
+    </div></div>`;
+  if ($('prog-load')) $('prog-load').onclick = () => applyPlan(nx.plan);
+  $('prog-all').onclick = () => { paintProgram(); show('program'); };
+}
+function paintProgram() {
+  const nx = nextSession();
+  $('prog-list').innerHTML = PROGRAM.map((week, w) => `
+    <div class="card week"><div class="week-h">שבוע ${w + 1}</div>
+    ${week.map((p, s) => {
+      const id = progId(w, s), d = prog.done[id], isNext = nx && nx.w === w && nx.s === s;
+      return `<button class="sess${d ? ' done' : ''}${isNext ? ' next' : ''}" data-w="${w}" data-s="${s}">
+        <span>${d ? '✅' : isNext ? '👉' : '⚪'} אימון ${s + 1}</span><b>${planLabel(p)}</b></button>`;
+    }).join('')}</div>`).join('');
+  document.querySelectorAll('.sess').forEach(b => b.addEventListener('click', () => {
+    const w = +b.dataset.w, s = +b.dataset.s, id = progId(w, s);
+    if (prog.done[id]) {
+      if (!confirm('האימון הזה כבר סומן כבוצע. לבטל את הסימון?')) return;
+      delete prog.done[id]; store.set('rw.prog', prog); paintProgram(); paintProgCard(); return;
+    }
+    applyPlan(PROGRAM[w][s]); show('setup');
+  }));
+}
+$('prog-back').addEventListener('click', () => show('setup'));
+$('prog-hide').addEventListener('click', () => { cfg.showProg = false; saveCfg(); show('setup'); });
+$('prog-reset').addEventListener('click', () => {
+  if (!confirm('לאפס את כל ההתקדמות בתוכנית?')) return;
+  prog = { done: {} }; store.set('rw.prog', prog); paintProgram(); paintProgCard();
+});
+
 /* ---------- קול ושמע ---------- */
 let heVoice = null;
 function pickVoice() {
   const vs = speechSynthesis.getVoices();
-  heVoice = vs.find(v => /^he|^iw/i.test(v.lang) && /google/i.test(v.name)) || vs.find(v => /^he|^iw/i.test(v.lang)) || null;
-  $('voice-hint').textContent = heVoice ? '' :
-    vs.length ? 'לא נמצא קול עברי במכשיר. באנדרואיד: הגדרות ← המרת טקסט לדיבור ← מנוע Google ← להתקין עברית.' : '';
+  heVoice = vs.find(v => /^(he|iw)/i.test(v.lang) && /google/i.test(v.name)) || vs.find(v => /^(he|iw)/i.test(v.lang)) || null;
+  voiceHint();
+}
+function voiceHint() {
+  $('voice-hint').textContent = cfg.voice !== 'tts' ? '' : heVoice ? '' :
+    'לא נמצא קול עברי במכשיר. באנדרואיד: הגדרות ← המרת טקסט לדיבור ← מנוע Google ← להתקין עברית.';
 }
 if ('speechSynthesis' in window) { pickVoice(); speechSynthesis.addEventListener('voiceschanged', pickVoice); }
 
@@ -154,12 +265,12 @@ function speak(text) {
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'he-IL'; if (heVoice) u.voice = heVoice;
-  u.volume = cfg.volume; u.rate = cfg.rate;
+  u.volume = cfg.volume;
   speechSynthesis.speak(u);
 }
 
 const audio = {
-  ctx: null, keep: null,
+  ctx: null, keep: null, hum: null, bufs: {}, playing: [],
   unlock() {
     if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
@@ -172,8 +283,16 @@ const audio = {
     g.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
     o.connect(g); g.connect(this.ctx.destination); o.start(t); o.stop(t + ms / 1000 + 0.05);
   },
-  // צליל שקט כמעט לגמרי בלולאה – שומר את הדף "חי" כשהמסך נעול
+  // רעש זעיר בלולאה שלא שומעים – שומר את הדף "פעיל" כשהמסך נעול.
+  // ב"מצב מוזיקה" לא מפעילים נגן מדיה, כדי לא לעצור את ספוטיפיי וכו'.
   startKeepAlive() {
+    if (this.ctx && !this.hum) {
+      const b = this.ctx.createBuffer(1, this.ctx.sampleRate, this.ctx.sampleRate), d = b.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() - 0.5) * 0.0004;
+      this.hum = this.ctx.createBufferSource(); this.hum.buffer = b; this.hum.loop = true;
+      this.hum.connect(this.ctx.destination); this.hum.start();
+    }
+    if (cfg.music) return;
     if (!this.keep) {
       const rate = 8000, n = rate * 2, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
       const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
@@ -186,45 +305,80 @@ const audio = {
     }
     this.keep.play().catch(() => {});
   },
-  stopKeepAlive() { if (this.keep) this.keep.pause(); }
+  stopKeepAlive() {
+    if (this.keep) this.keep.pause();
+    if (this.hum) { try { this.hum.stop(); } catch (e) {} this.hum = null; }
+  },
+  async load(key) {
+    const v = cfg.voice, id = v + '/' + key;
+    if (this.bufs[id]) return this.bufs[id];
+    const r = await fetch(`clips/${v}/${key}.mp3`);
+    if (!r.ok) throw new Error('missing ' + key);
+    const ab = await r.arrayBuffer();
+    return (this.bufs[id] = await new Promise((res, rej) => this.ctx.decodeAudioData(ab, res, rej)));
+  },
+  stopPlaying() { this.playing.forEach(s => { try { s.stop(); } catch (e) {} }); this.playing = []; }
 };
 
-/* ---------- בניית האימון ---------- */
-function buildSegments(c) {
-  const s = [];
-  if (c.warmup) s.push({ kind: 'easy', label: 'חימום', dur: c.warmup });
-  for (let r = 1; r <= c.rounds; r++) {
-    s.push({ kind: 'run', label: 'ריצה', dur: c.run, round: r });
-    // אחרי הריצה האחרונה: אם יש שחרור – הוא מחליף את ההליכה
-    if (r < c.rounds || !c.cooldown) s.push({ kind: 'walk', label: 'הליכה', dur: c.walk, round: r });
-  }
-  if (c.cooldown) s.push({ kind: 'easy', label: 'שחרור', dur: c.cooldown });
-  let t = 0; s.forEach(x => { x.start = t; t += x.dur; });
-  return s;
+// השמעת משפט מורכב מכמה הקלטות. אם משהו חסר – הכל נקרא בקול של הטלפון.
+async function say(keys) {
+  keys = keys.filter(Boolean);
+  const text = keys.map(k => k[0] === '#' ? k.slice(1) : CLIPS[k]).join(' ');
+  if (cfg.voice === 'tts' || !audio.ctx || keys.some(k => k[0] === '#')) return speak(text);
+  let bufs;
+  try {
+    bufs = await Promise.race([Promise.all(keys.map(k => audio.load(k))), new Promise((_, rej) => setTimeout(() => rej('slow'), 2500))]);
+  } catch (e) { return speak(text); }
+  audio.stopPlaying();
+  if (audio.ctx.state === 'suspended') audio.ctx.resume();
+  const g = audio.ctx.createGain(); g.gain.value = cfg.volume; g.connect(audio.ctx.destination);
+  let t = audio.ctx.currentTime + 0.05;
+  bufs.forEach(b => {
+    const s = audio.ctx.createBufferSource(); s.buffer = b; s.connect(g); s.start(t);
+    audio.playing.push(s); t += b.duration + 0.08;
+  });
+}
+// טעינה מראש של כל ההקלטות של הקול הנבחר (כדי שיעבדו גם בלי אינטרנט)
+function prefetchVoice() {
+  if (cfg.voice === 'tts' || store.get('rw.pref.' + cfg.voice, 0)) return;
+  const keys = Object.keys(CLIPS), v = cfg.voice;
+  let i = 0, bad = 0;
+  const next = () => {
+    if (i >= keys.length) { if (!bad) store.set('rw.pref.' + v, 1); return; }
+    const batch = keys.slice(i, i += 12);
+    Promise.all(batch.map(k => fetch(`clips/${v}/${k}.mp3`).then(r => { if (!r.ok) bad++; }, () => { bad++; })))
+      .then(() => bad ? null : setTimeout(next, 150));
+  };
+  setTimeout(next, 2500);
 }
 
 /* ---------- מנוע הטיימר ---------- */
-const W = { segs: [], total: 0, t0: 0, pausedAt: 0, pausedMs: 0, idx: -1, cue: {}, timer: null, lock: null };
+const W = { segs: [], total: 0, t0: 0, pausedAt: 0, pausedMs: 0, idx: -1, cue: {}, timer: null, lock: null, n: 0, lastCheer: 0 };
 const now = () => Date.now();
 const elapsed = () => ((W.pausedAt || now()) - W.t0 - W.pausedMs) / 1000;
 
-function announce(seg, i) {
-  const last = seg.round === cfg.rounds;
-  let t = '';
+function segKeys(seg, i) {
+  const last = seg.round === W.n;
   if (seg.kind === 'run') {
-    if (cfg.round && cfg.rounds > 1) t += last ? 'סיבוב אחרון! ' : `סיבוב ${seg.round === 1 ? 'ראשון' : heb(seg.round)} מתוך ${heb(cfg.rounds)}. `;
-    t += `עכשיו ריצה, ${durWords(seg.dur)}.`;
-  } else if (seg.kind === 'walk') {
-    t = `עכשיו הליכה, ${durWords(seg.dur)}.`;
-    if (last) t += ' זה הקטע האחרון.';
-  } else {
-    t = i === 0 ? `מתחילים בחימום, ${durWords(seg.dur)} הליכה.` : `כל הכבוד! עכשיו שחרור, ${durWords(seg.dur)} הליכה.`;
+    const k = [];
+    if (cfg.round && W.n > 1) k.push(...(last ? ['rlast'] : seg.round === 1 ? ['r1', 'of' + W.n] : ['r' + seg.round, 'of' + W.n]));
+    return [...k, 'now_run', ...durKeys(seg.dur)];
   }
+  if (seg.kind === 'walk') return ['now_walk', ...durKeys(seg.dur), last ? 'last_seg' : ''];
+  return [i === 0 ? 'warm' : 'cool', ...durKeys(seg.dur), 'walkw'];
+}
+function announce(seg, i) {
   audio.beep(1175, 260, 0.6);
-  setTimeout(() => speak(t), 300);
+  setTimeout(() => say(segKeys(seg, i)), 300);
   if (cfg.vibe && navigator.vibrate) navigator.vibrate(seg.kind === 'run' ? [300, 120, 300] : [600]);
   setMedia();
 }
+function cheerKey(seg) {
+  if (seg.round === W.n) return 'cheer_last';
+  let k; do { k = 1 + Math.floor(Math.random() * 7); } while (k === W.lastCheer);
+  W.lastCheer = k; return 'cheer' + k;
+}
+const crossed = (remain, mark) => remain <= mark && remain > mark - 3;
 
 function tick() {
   const e = elapsed();
@@ -236,9 +390,13 @@ function tick() {
   const remain = seg.start + seg.dur - e;
 
   if (!W.pausedAt) {
-    if (cfg.half && seg.dur >= 120 && !W.cue.half && remain <= seg.dur / 2 && remain > seg.dur / 2 - 3) { W.cue.half = 1; speak('חצי עבר.'); }
-    if (cfg.min && seg.dur >= 180 && !W.cue.min && remain <= 60 && remain > 57) { W.cue.min = 1; speak('עוד דקה.'); }
-    if (cfg.count && i < W.segs.length) {
+    if (cfg.half && seg.dur >= 120 && !W.cue.half && crossed(remain, seg.dur / 2)) { W.cue.half = 1; say(['half']); }
+    // עידוד: בריצות של 2 דקות ומעלה, בחצי השני של האימון
+    if (cfg.cheer && seg.kind === 'run' && seg.dur >= 120 && !W.cue.cheer && (seg.round > W.n / 2 || seg.round === W.n) && crossed(remain, seg.dur * 0.62)) {
+      W.cue.cheer = 1; say([cheerKey(seg)]);
+    }
+    if (cfg.min && seg.dur >= 180 && !W.cue.min && crossed(remain, 60)) { W.cue.min = 1; say(['one_min']); }
+    if (cfg.count) {
       const s = Math.ceil(remain);
       if (s <= 3 && s >= 1 && W.cue.cnt !== s) { W.cue.cnt = s; audio.beep(660, 120, 0.45); }
     }
@@ -254,18 +412,18 @@ function paintRun(seg, i, remain, e) {
   $('next').textContent = nx ? `הבא: ${nx.label} ${fmtShort(nx.dur)}` : 'הקטע האחרון 💪';
   $('seg-bar').style.width = (100 * (1 - remain / seg.dur)) + '%';
   $('all-bar').style.width = (100 * e / W.total) + '%';
-  $('round').textContent = seg.round ? `${seg.round}/${cfg.rounds}` : '–';
+  $('round').textContent = seg.round ? `${seg.round}/${W.n}` : '–';
   $('elapsed').textContent = fmt(e);
   $('left').textContent = fmt(W.total - e);
   document.title = `${seg.label} ${fmt(remain)}`;
 }
 
 function setMedia() {
-  if (!('mediaSession' in navigator) || W.idx < 0) return;
+  if (cfg.music || !('mediaSession' in navigator) || W.idx < 0) return;
   const seg = W.segs[W.idx];
   try {
     navigator.mediaSession.metadata = new MediaMetadata({
-      title: seg.label + (seg.round ? ` · סיבוב ${seg.round}/${cfg.rounds}` : ''),
+      title: seg.label + (seg.round ? ` · סיבוב ${seg.round}/${W.n}` : ''),
       artist: 'ריצה והליכה',
       artwork: [{ src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' }]
     });
@@ -280,17 +438,27 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && W.timer) { wakeLock(); tick(); }
 });
 
-function start() {
+async function start() {
   audio.unlock(); audio.startKeepAlive();
-  speak(' '); // "פותח" את מנוע הדיבור מתוך לחיצת המשתמש
-  W.segs = buildSegments(cfg);
+  if (cfg.voice === 'tts') speak(' '); // "פותח" את מנוע הדיבור מתוך לחיצת המשתמש
+  W.segs = buildSegments(cfg); W.n = runsOf(cfg).length;
   W.total = W.segs.reduce((a, s) => a + s.dur, 0);
+  W.plan = planOf(cfg);
+  const nx = nextSession(); W.progId = nx && samePlan(nx.plan, cfg) ? progId(nx.w, nx.s) : null;
+  // טוענים מראש את כל ההקלטות של האימון
+  if (cfg.voice !== 'tts') {
+    $('start').textContent = '⏳ טוען קול...';
+    const keys = new Set(['half', 'one_min', 'pause', 'resume', 'done', 'ran', 'record', 'prog_done', 'cheer_last', 'cheer1', 'cheer2', 'cheer3', 'cheer4', 'cheer5', 'cheer6', 'cheer7']);
+    W.idx = -1; W.segs.forEach((s, i) => segKeys(s, i).forEach(k => k && k[0] !== '#' && keys.add(k)));
+    await Promise.race([Promise.all([...keys].map(k => audio.load(k).catch(() => {}))), new Promise(r => setTimeout(r, 4000))]);
+    $('start').textContent = '▶ התחלה';
+  }
   W.t0 = now(); W.pausedAt = 0; W.pausedMs = 0; W.idx = -1; W.cue = {};
   show('run');
   wakeLock();
   clearInterval(W.timer); W.timer = setInterval(tick, 250);
   tick();
-  if ('mediaSession' in navigator) {
+  if (!cfg.music && 'mediaSession' in navigator) {
     try {
       navigator.mediaSession.setActionHandler('pause', togglePause);
       navigator.mediaSession.setActionHandler('play', togglePause);
@@ -302,9 +470,9 @@ function togglePause() {
   if (!W.timer) return;
   if (W.pausedAt) {
     W.pausedMs += now() - W.pausedAt; W.pausedAt = 0;
-    $('pause').textContent = '⏸ הפסקה'; speak('ממשיכים!'); audio.startKeepAlive();
+    $('pause').textContent = '⏸ הפסקה'; say(['resume']); audio.startKeepAlive();
   } else {
-    W.pausedAt = now(); $('pause').textContent = '▶ המשך'; speak('הפסקה.');
+    W.pausedAt = now(); $('pause').textContent = '▶ המשך'; say(['pause']);
   }
   setMedia(); tick();
 }
@@ -314,38 +482,80 @@ function skip() {
   W.t0 -= (target - elapsed()) * 1000;
   tick();
 }
+
+/* ---------- סיום, שיאים והיסטוריה ---------- */
+function bests(h) {
+  return {
+    run: Math.max(0, ...h.map(r => r.run || 0)),
+    seg: Math.max(0, ...h.map(r => r.maxSeg || 0)),
+  };
+}
 function finish(completed) {
   clearInterval(W.timer); W.timer = null;
   const e = Math.min(elapsed(), W.total);
-  // כמה זמן ריצה בפועל
-  let runSec = 0, roundsDone = 0;
+  let runSec = 0, roundsDone = 0, maxSeg = 0;
   W.segs.forEach(s => {
     if (s.kind !== 'run') return;
     const part = Math.max(0, Math.min(s.dur, e - s.start));
-    runSec += part; if (part >= s.dur) roundsDone++;
+    runSec += part; if (part >= s.dur) { roundsDone++; maxSeg = Math.max(maxSeg, s.dur); }
   });
+  runSec = Math.round(runSec);
+
+  const h = store.get('rw.history', []);
+  const prev = bests(h);
+  const recRun = h.length > 0 && runSec > prev.run, recSeg = h.length > 0 && maxSeg > prev.seg;
+  let progDone = false;
+  if (completed && W.progId) { prog.done[W.progId] = Date.now(); store.set('rw.prog', prog); progDone = true; }
+
   if (completed) {
+    audio.stopPlaying();
     audio.beep(988, 200); setTimeout(() => audio.beep(1319, 400), 220);
-    setTimeout(() => speak(`סיימת! כל הכבוד! רצת ${durWords(Math.round(runSec / 60) * 60 || Math.round(runSec))}.`), 700);
+    const ranK = runSec >= 60 ? durKeys(Math.round(runSec / 60) * 60) : durKeys(runSec);
+    setTimeout(() => say(['done', 'ran', ...ranK, (recRun || recSeg) ? 'record' : '', progDone ? 'prog_done' : '']), 700);
     if (cfg.vibe && navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 500]);
-  } else speechSynthesis.cancel();
-  setTimeout(() => audio.stopKeepAlive(), 6000);
+  } else { audio.stopPlaying(); if ('speechSynthesis' in window) speechSynthesis.cancel(); }
+  setTimeout(() => { if (!W.timer) audio.stopKeepAlive(); }, 9000);
   if (W.lock) { W.lock.release().catch(() => {}); W.lock = null; }
   document.body.className = ''; document.title = 'ריצה והליכה';
 
   if (e > 30) {
-    const h = store.get('rw.history', []);
-    h.unshift({ at: Date.now(), total: Math.round(e), run: Math.round(runSec), rounds: roundsDone, plan: presetLabel(cfg), done: completed });
-    store.set('rw.history', h.slice(0, 30));
+    h.unshift({ at: Date.now(), total: Math.round(e), run: runSec, rounds: roundsDone, of: W.n, plan: planLabel(W.plan), done: completed, maxSeg });
+    store.set('rw.history', h.slice(0, 300));
   }
   $('done-title').textContent = completed ? 'כל הכבוד! 🎉' : 'האימון נעצר';
   $('summary').innerHTML = `
+    ${recRun ? `<div class="rec">🏅 שיא חדש: הכי הרבה זמן ריצה באימון – ${fmt(runSec)}</div>` : ''}
+    ${recSeg ? `<div class="rec">🏅 שיא חדש: ריצה רצופה הכי ארוכה – ${fmtShort(maxSeg)}</div>` : ''}
+    ${progDone ? '<div class="rec prog-rec">📅 אימון בתוכנית סומן כבוצע ✓</div>' : ''}
     <div class="row"><span>זמן כולל</span><b>${fmt(e)}</b></div>
     <div class="row"><span>זמן ריצה</span><b>${fmt(runSec)}</b></div>
-    <div class="row"><span>סיבובים שהושלמו</span><b>${roundsDone} מתוך ${cfg.rounds}</b></div>
-    <div class="row"><span>תוכנית</span><b>${presetLabel(cfg)}</b></div>`;
-  paintHistory();
+    <div class="row"><span>סיבובים שהושלמו</span><b>${roundsDone} מתוך ${W.n}</b></div>
+    <div class="row"><span>תוכנית</span><b>${planLabel(W.plan)}</b></div>`;
+  paintHistory(); paintStats(); paintProgCard();
   show('done');
+}
+function weekStart(t) { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - d.getDay()); return d.getTime(); }
+function paintStats() {
+  const h = store.get('rw.history', []);
+  const box = $('stats-card');
+  if (!h.length) { box.innerHTML = ''; return; }
+  const ws = weekStart(Date.now()), wk = h.filter(r => r.at >= ws);
+  const weekRun = wk.reduce((a, r) => a + r.run, 0);
+  // רצף שבועות עם לפחות אימון אחד (השבוע הנוכחי נספר אם כבר רצת בו)
+  const weeks = new Set(h.map(r => weekStart(r.at)));
+  let streak = 0, w = ws;
+  if (!weeks.has(w)) w -= 7 * 864e5;
+  while (weeks.has(w)) { streak++; w = weekStart(w - 3 * 864e5); }
+  const b = bests(h);
+  box.innerHTML = `<div class="card stats-card">
+    <div class="st-h">📊 הסטטיסטיקה שלי</div>
+    <div class="st-grid">
+      <div><b>${Math.round(weekRun / 60)}</b><small>דק׳ ריצה השבוע</small></div>
+      <div><b>${wk.length}</b><small>אימונים השבוע</small></div>
+      <div><b>${streak}</b><small>שבועות ברצף</small></div>
+    </div>
+    <div class="st-best">🏅 ריצה רצופה הכי ארוכה: <b>${b.seg ? fmtShort(b.seg) : '–'}</b> · הכי הרבה ריצה באימון: <b>${fmt(b.run)}</b></div>
+  </div>`;
 }
 function paintHistory() {
   const h = store.get('rw.history', []);
@@ -376,4 +586,4 @@ window.addEventListener('beforeinstallprompt', e => {
 if (/iphone|ipad|ipod/i.test(navigator.userAgent) && !navigator.standalone)
   $('install-hint').textContent = '📲 להתקנה: כפתור השיתוף ⬆️ ← "הוספה למסך הבית"';
 
-buildSteppers(); bindSettings(); paintPresets(); paintTotal();
+buildSteppers(); bindSettings(); paintSetup(); paintPresets(); paintTotal(); paintProgCard(); paintStats(); prefetchVoice();

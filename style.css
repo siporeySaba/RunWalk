@@ -91,3 +91,47 @@ h2 { font-size: 34px; margin: 6px 0 14px; }
 .history { list-style: none; padding: 0; margin: 0; text-align: right; }
 .history li { background: var(--card); border-radius: 12px; padding: 10px 14px; margin-bottom: 6px; font-size: 16px; display: flex; justify-content: space-between; }
 .history li span { color: var(--mut); }
+
+/* מצב קבוע / רצף מותאם */
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--bg); border-radius: 14px; padding: 4px; margin: 6px 0 4px; }
+.seg button { border: 0; border-radius: 11px; padding: 10px; font: inherit; font-size: 17px; font-weight: 800; background: transparent; color: var(--mut); }
+.seg button.on { background: var(--line); color: var(--txt); }
+.custom-only { display: none; }
+body.custom-mode .custom-only { display: flex; }
+body.custom-mode .fixed-only { display: none; }
+.row.col { flex-direction: column; align-items: stretch; }
+.txt, .sel { font: inherit; font-size: 22px; font-weight: 800; background: var(--bg); color: var(--txt); border: 2px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.txt { text-align: center; letter-spacing: 1px; }
+.sel { font-size: 17px; padding: 8px 10px; }
+.row.col .hint { margin: 2px 0 0; }
+.hint.left { text-align: right; margin: -4px 0 6px; font-size: 14px; }
+
+/* תוכנית התקדמות */
+.prog { padding: 14px; border: 2px solid #3b4a63; }
+.prog-h { font-weight: 900; font-size: 18px; display: flex; justify-content: space-between; }
+.prog-h span { color: var(--mut); font-weight: 600; }
+.prog-bar { height: 8px; background: var(--bg); border-radius: 99px; margin: 10px 0; overflow: hidden; }
+.prog-bar div { height: 100%; background: linear-gradient(90deg, var(--walk), var(--run)); border-radius: 99px; }
+.prog-next { font-size: 17px; line-height: 1.5; }
+.prog-next .ok { color: var(--walk); font-weight: 800; }
+.prog-btns { display: flex; gap: 8px; margin-top: 8px; }
+.prog-btns .btn { margin: 0; flex: 1; }
+.prog-btns .btn:not(.ghost) { background: var(--walk); }
+.week { padding: 10px 12px; }
+.week-h { font-weight: 900; color: var(--mut); margin-bottom: 6px; }
+.sess { display: flex; justify-content: space-between; align-items: center; width: 100%; background: var(--bg); color: var(--txt); border: 2px solid transparent; border-radius: 12px; padding: 10px 12px; margin-bottom: 6px; font: inherit; font-size: 16px; }
+.sess.done { opacity: .55; }
+.sess.next { border-color: var(--run); }
+
+/* סטטיסטיקה ושיאים */
+.stats-card { padding: 14px; margin-top: 14px; }
+.st-h { font-weight: 900; margin-bottom: 10px; }
+.st-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center; }
+.st-grid div { background: var(--bg); border-radius: 12px; padding: 8px 4px; }
+.st-grid b { display: block; font-size: 26px; }
+.st-grid small { color: var(--mut); font-size: 13px; }
+.st-best { margin-top: 10px; font-size: 15px; color: var(--mut); line-height: 1.5; }
+.st-best b { color: var(--txt); }
+.rec { background: #854d0e; border-radius: 12px; padding: 10px; margin: 8px 0; font-weight: 800; text-align: center; }
+.rec.prog-rec { background: #166534; }
+#done .stats-card { text-align: right; }
