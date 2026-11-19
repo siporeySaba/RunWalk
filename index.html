@@ -96,8 +96,9 @@
 <section id="program" class="screen">
   <header class="top">
     <h1>📅 התוכנית</h1>
-    <p class="sub">8 שבועות, 3 אימונים בשבוע, עד 30 דקות ריצה רצופה.<br>אימון שמסיימים עד הסוף מסומן לבד ✓</p>
+    <p class="sub">אימון שמסיימים עד הסוף מסומן לבד ✓<br>אפשר לערוך: לשנות אימונים, להוסיף ולמחוק</p>
   </header>
+  <button class="btn ghost" id="prog-edit">✏️ עריכת התוכנית</button>
   <div id="prog-list"></div>
   <button class="btn go" id="prog-back">חזרה</button>
   <button class="btn ghost small" id="prog-hide">הסתרת התוכנית מהמסך הראשי</button>
@@ -133,6 +134,27 @@
   <h3 class="hist-h">ריצות אחרונות</h3>
   <ul class="history" id="history"></ul>
 </section>
+
+<!-- כל הריצות -->
+<section id="hist" class="screen">
+  <header class="top"><h1>🗂️ כל הריצות</h1><p class="sub">🗑️ מוחק ריצה אחת. השיאים והסטטיסטיקה מתעדכנים לבד.</p></header>
+  <ul class="history" id="hist-all"></ul>
+  <button class="btn go" id="hist-back">חזרה</button>
+  <button class="btn ghost small danger" id="hist-clear">מחיקת כל הריצות</button>
+</section>
+
+<!-- עורך אימון בתוכנית -->
+<dialog id="ed" class="ed">
+  <h3 id="ed-title">עריכת אימון</h3>
+  <div class="seg" id="ed-mode"><button data-m="fixed">קבוע</button><button data-m="custom">רצף מותאם</button></div>
+  <label class="ed-f ed-fixed">🏃 ריצה (דקות)<input id="ed-run" class="txt" type="number" inputmode="decimal" step="0.25" min="0.25"></label>
+  <label class="ed-f ed-fixed">🔁 סיבובים<input id="ed-rounds" class="txt" type="number" inputmode="numeric" min="1" max="40"></label>
+  <label class="ed-f ed-custom">🏃 ריצות בדקות, מופרד בפסיקים<input id="ed-custom" class="txt" dir="ltr" inputmode="decimal"></label>
+  <label class="ed-f">🚶 הליכה בין הריצות (דקות)<input id="ed-walk" class="txt" type="number" inputmode="decimal" step="0.25" min="0.25"></label>
+  <div class="ed-sum" id="ed-sum"></div>
+  <button class="btn ghost small" id="ed-copy">📋 להעתיק מההגדרות שבמסך הראשי</button>
+  <div class="ed-btns"><button class="btn go" id="ed-save">שמירה</button><button class="btn ghost" id="ed-cancel">ביטול</button></div>
+</dialog>
 
 <script src="clips.js"></script>
 <script src="app.js"></script>

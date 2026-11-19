@@ -26,7 +26,7 @@ const BUILTIN = [
 /* ---------- תוכנית התקדמות: 8 שבועות עד 30 דקות ריצה רצופה ---------- */
 const F = (run, rounds, walk = 60) => ({ mode: 'fixed', run: run * 60, walk, rounds });
 const C = (list, walk = 60) => ({ mode: 'custom', custom: list, walk });
-const PROGRAM = [
+const DEFAULT_PROGRAM = [
   [F(4, 6), F(5, 5), F(5, 6)],
   [F(6, 5), C('4, 6, 8, 6, 4'), F(7, 4)],
   [F(8, 4), C('5, 7, 9, 7, 5'), F(8, 4)],
@@ -36,15 +36,19 @@ const PROGRAM = [
   [C('20, 10'), F(18, 2), C('22, 12')],
   [C('25, 5'), C('20, 10'), F(30, 1)],
 ];
-const progId = (w, s) => `w${w}s${s}`;
+// התוכנית ניתנת לעריכה ונשמרת במכשיר. לכל אימון מזהה קבוע, כדי שהסימון ✓ לא יזוז כשמוסיפים/מוחקים.
+const defaultProgram = () => DEFAULT_PROGRAM.map((wk, w) => wk.map((p, s) => ({ ...p, id: `w${w}s${s}` })));
+let PROGRAM = store.get('rw.program', null) || defaultProgram();
+const saveProgram = () => store.set('rw.program', PROGRAM);
 let prog = store.get('rw.prog', { done: {} });
 function nextSession() {
   for (let w = 0; w < PROGRAM.length; w++)
     for (let s = 0; s < PROGRAM[w].length; s++)
-      if (!prog.done[progId(w, s)]) return { w, s, plan: PROGRAM[w][s] };
+      if (!prog.done[PROGRAM[w][s].id]) return { w, s, plan: PROGRAM[w][s], id: PROGRAM[w][s].id };
   return null;
 }
 const progCount = () => PROGRAM.reduce((a, w) => a + w.length, 0);
+const progDoneCount = () => PROGRAM.reduce((a, w) => a + w.filter(p => prog.done[p.id]).length, 0);
 
 /* ---------- מספרים ומילים ---------- */
 function minWords(m) { return m === 1 ? 'דקה' : m === 2 ? 'שתי דקות' : heb(m) + ' דקות'; }
@@ -209,7 +213,7 @@ $('save-preset').addEventListener('click', () => {
 function paintProgCard() {
   const box = $('prog-card');
   if (!cfg.showProg) { box.innerHTML = '<button class="btn ghost small" id="prog-show">📅 תוכנית התקדמות ל-30 דקות ריצה</button>'; $('prog-show').onclick = () => { cfg.showProg = true; saveCfg(); }; return; }
-  const nx = nextSession(), done = Object.keys(prog.done).length, all = progCount();
+  const nx = nextSession(), done = progDoneCount(), all = progCount();
   box.innerHTML = `<div class="card prog">
     <div class="prog-h">📅 התוכנית: 30 דקות ריצה רצופה <span>${done}/${all}</span></div>
     <div class="prog-bar"><div style="width:${100 * done / all}%"></div></div>
@@ -222,25 +226,89 @@ function paintProgCard() {
   if ($('prog-load')) $('prog-load').onclick = () => applyPlan(nx.plan);
   $('prog-all').onclick = () => { paintProgram(); show('program'); };
 }
+let progEdit = false;
 function paintProgram() {
   const nx = nextSession();
+  document.body.classList.toggle('prog-editing', progEdit);
+  $('prog-edit').textContent = progEdit ? '✓ סיום עריכה' : '✏️ עריכת התוכנית';
   $('prog-list').innerHTML = PROGRAM.map((week, w) => `
-    <div class="card week"><div class="week-h">שבוע ${w + 1}</div>
+    <div class="card week"><div class="week-h">שבוע ${w + 1}
+      ${progEdit ? `<button class="mini del" data-act="del-week" data-w="${w}">🗑️ מחיקת שבוע</button>` : ''}</div>
     ${week.map((p, s) => {
-      const id = progId(w, s), d = prog.done[id], isNext = nx && nx.w === w && nx.s === s;
-      return `<button class="sess${d ? ' done' : ''}${isNext ? ' next' : ''}" data-w="${w}" data-s="${s}">
-        <span>${d ? '✅' : isNext ? '👉' : '⚪'} אימון ${s + 1}</span><b>${planLabel(p)}</b></button>`;
-    }).join('')}</div>`).join('');
-  document.querySelectorAll('.sess').forEach(b => b.addEventListener('click', () => {
-    const w = +b.dataset.w, s = +b.dataset.s, id = progId(w, s);
-    if (prog.done[id]) {
-      if (!confirm('האימון הזה כבר סומן כבוצע. לבטל את הסימון?')) return;
-      delete prog.done[id]; store.set('rw.prog', prog); paintProgram(); paintProgCard(); return;
-    }
-    applyPlan(PROGRAM[w][s]); show('setup');
-  }));
+      const d = prog.done[p.id], isNext = nx && nx.id === p.id;
+      return `<div class="sess-row"><button class="sess${d ? ' done' : ''}${isNext ? ' next' : ''}" data-act="pick" data-w="${w}" data-s="${s}">
+        <span>${d ? '✅' : isNext ? '👉' : '⚪'} אימון ${s + 1}</span><b>${planLabel(p)}</b></button>
+        ${progEdit ? `<button class="mini" data-act="edit" data-w="${w}" data-s="${s}" aria-label="עריכה">✏️</button>
+        <button class="mini del" data-act="del" data-w="${w}" data-s="${s}" aria-label="מחיקה">🗑️</button>` : ''}</div>`;
+    }).join('')}
+    ${progEdit ? `<button class="btn ghost small" data-act="add" data-w="${w}">➕ הוספת אימון לשבוע ${w + 1}</button>` : ''}
+    </div>`).join('') +
+    (progEdit ? `<button class="btn ghost small" data-act="add-week">➕ הוספת שבוע</button>
+      <button class="btn ghost small" data-act="restore">↩️ שחזור התוכנית המקורית</button>` : '');
+  $('prog-list').querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => progAction(b.dataset.act, +b.dataset.w, +b.dataset.s)));
 }
-$('prog-back').addEventListener('click', () => show('setup'));
+function progAction(act, w, s) {
+  const p = PROGRAM[w] && PROGRAM[w][s];
+  if (act === 'pick') {
+    if (progEdit) return openEditor(w, s);
+    if (prog.done[p.id]) {
+      if (!confirm('האימון הזה כבר סומן כבוצע. לבטל את הסימון?')) return;
+      delete prog.done[p.id]; store.set('rw.prog', prog); paintProgram(); paintProgCard(); return;
+    }
+    applyPlan(p); show('setup'); return;
+  }
+  if (act === 'edit') return openEditor(w, s);
+  if (act === 'add') return openEditor(w, -1);
+  if (act === 'del') { if (!confirm(`למחוק את אימון ${s + 1} משבוע ${w + 1}?`)) return; PROGRAM[w].splice(s, 1); }
+  if (act === 'del-week') { if (!confirm(`למחוק את כל שבוע ${w + 1}?`)) return; PROGRAM.splice(w, 1); }
+  if (act === 'add-week') PROGRAM.push([]);
+  if (act === 'restore') { if (!confirm('לחזור לתוכנית המקורית? השינויים שעשית בתוכנית יימחקו.')) return; PROGRAM = defaultProgram(); }
+  saveProgram(); paintProgram(); paintProgCard();
+}
+
+/* עורך אימון בתוכנית */
+const ED = { w: 0, s: -1, mode: 'fixed' };
+function edPlan() {
+  const toSec = id => Math.round(Math.max(0.25, parseFloat($(id).value) || 1) * 4) * 15;
+  const walk = toSec('ed-walk');
+  if (ED.mode === 'custom') {
+    const a = parseCustom($('ed-custom').value);
+    return { mode: 'custom', custom: (a.length ? a : [300]).map(fmtMin).join(', '), walk };
+  }
+  return { mode: 'fixed', run: toSec('ed-run'), walk, rounds: Math.min(40, Math.max(1, parseInt($('ed-rounds').value) || 1)) };
+}
+function edFill(p) {
+  ED.mode = p.mode || 'fixed';
+  $('ed-run').value = fmtMin(p.run || 300); $('ed-rounds').value = p.rounds || 5;
+  $('ed-custom').value = p.custom || runsOf(p).map(fmtMin).join(', ');
+  $('ed-walk').value = fmtMin(p.walk || 60);
+  edPaint();
+}
+function edPaint() {
+  document.querySelectorAll('#ed-mode button').forEach(b => b.classList.toggle('on', b.dataset.m === ED.mode));
+  $('ed').classList.toggle('custom', ED.mode === 'custom');
+  const p = edPlan(), segs = buildSegments({ ...p, warmup: 0, cooldown: 0 });
+  $('ed-sum').textContent = `${planLabel(p)} · סה״כ ${fmt(segs.reduce((a, x) => a + x.dur, 0))}`;
+}
+function openEditor(w, s) {
+  Object.assign(ED, { w, s });
+  $('ed-title').textContent = s < 0 ? `אימון חדש בשבוע ${w + 1}` : `עריכת שבוע ${w + 1} · אימון ${s + 1}`;
+  edFill(s < 0 ? (PROGRAM[w][PROGRAM[w].length - 1] || planOf(cfg)) : PROGRAM[w][s]);
+  $('ed').showModal();
+}
+document.querySelectorAll('#ed-mode button').forEach(b => b.addEventListener('click', () => { ED.mode = b.dataset.m; edPaint(); }));
+['ed-run', 'ed-rounds', 'ed-custom', 'ed-walk'].forEach(id => $(id).addEventListener('input', edPaint));
+$('ed-copy').addEventListener('click', () => edFill(planOf(cfg)));
+$('ed-cancel').addEventListener('click', () => $('ed').close());
+$('ed-save').addEventListener('click', () => {
+  const p = edPlan();
+  if (ED.s < 0) PROGRAM[ED.w].push({ ...p, id: 'x' + Date.now().toString(36) });
+  else PROGRAM[ED.w][ED.s] = { ...p, id: PROGRAM[ED.w][ED.s].id };
+  saveProgram(); $('ed').close(); paintProgram(); paintProgCard();
+});
+
+$('prog-edit').addEventListener('click', () => { progEdit = !progEdit; paintProgram(); });
+$('prog-back').addEventListener('click', () => { progEdit = false; show('setup'); });
 $('prog-hide').addEventListener('click', () => { cfg.showProg = false; saveCfg(); show('setup'); });
 $('prog-reset').addEventListener('click', () => {
   if (!confirm('לאפס את כל ההתקדמות בתוכנית?')) return;
@@ -444,7 +512,7 @@ async function start() {
   W.segs = buildSegments(cfg); W.n = runsOf(cfg).length;
   W.total = W.segs.reduce((a, s) => a + s.dur, 0);
   W.plan = planOf(cfg);
-  const nx = nextSession(); W.progId = nx && samePlan(nx.plan, cfg) ? progId(nx.w, nx.s) : null;
+  const nx = nextSession(); W.progId = nx && samePlan(nx.plan, cfg) ? nx.id : null;
   // טוענים מראש את כל ההקלטות של האימון
   if (cfg.voice !== 'tts') {
     $('start').textContent = '⏳ טוען קול...';
@@ -555,15 +623,33 @@ function paintStats() {
       <div><b>${streak}</b><small>שבועות ברצף</small></div>
     </div>
     <div class="st-best">🏅 ריצה רצופה הכי ארוכה: <b>${b.seg ? fmtShort(b.seg) : '–'}</b> · הכי הרבה ריצה באימון: <b>${fmt(b.run)}</b></div>
+    <button class="btn ghost small" id="hist-open">🗂️ כל הריצות (${h.length})</button>
   </div>`;
+  $('hist-open').onclick = () => { paintHistory(); show('hist'); };
 }
+// רשימת ריצות עם כפתור מחיקה לכל אחת. מופיעה בסיכום (5 אחרונות) ובמסך "כל הריצות"
 function paintHistory() {
   const h = store.get('rw.history', []);
-  $('history').innerHTML = h.slice(0, 10).map(r => {
+  const row = r => {
     const d = new Date(r.at);
-    return `<li><b>${d.getDate()}.${d.getMonth() + 1} · ריצה ${fmt(r.run)}${r.done ? ' ✓' : ''}</b><span>${r.plan}</span></li>`;
-  }).join('') || '<li><span>עוד אין ריצות שמורות</span></li>';
+    return `<li><div><b>${d.getDate()}.${d.getMonth() + 1} · ריצה ${fmt(r.run)}${r.done ? ' ✓' : ''}</b><span>${r.plan}</span></div>
+      <button class="mini del" data-at="${r.at}" aria-label="מחיקה">🗑️</button></li>`;
+  };
+  const empty = '<li><span>עוד אין ריצות שמורות</span></li>';
+  $('history').innerHTML = h.slice(0, 5).map(row).join('') || empty;
+  $('hist-all').innerHTML = h.map(row).join('') || empty;
+  $('hist-clear').hidden = !h.length;
+  document.querySelectorAll('.history .del').forEach(b => b.addEventListener('click', () => {
+    if (!confirm('למחוק את הריצה הזו?')) return;
+    store.set('rw.history', store.get('rw.history', []).filter(r => String(r.at) !== b.dataset.at));
+    paintHistory(); paintStats();
+  }));
 }
+$('hist-back').addEventListener('click', () => show('setup'));
+$('hist-clear').addEventListener('click', () => {
+  if (!confirm('למחוק את כל הריצות השמורות? (הסימונים בתוכנית נשארים)')) return;
+  store.set('rw.history', []); paintHistory(); paintStats(); show('setup');
+});
 
 function show(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id));
