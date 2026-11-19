@@ -171,7 +171,7 @@ function bindSettings() {
   $('volume').addEventListener('input', () => { cfg.volume = +$('volume').value; saveCfg(); });
   $('voice').value = cfg.voice;
   $('voice').addEventListener('change', () => { cfg.voice = $('voice').value; saveCfg(); voiceHint(); prefetchVoice(); });
-  $('test-voice').addEventListener('click', () => { audio.unlock(); say(['test']); });
+  $('test-voice').addEventListener('click', () => { audio.unlock(); if (cfg.music) audio.primeVoiceEl(); setTimeout(() => say(['test'], { beep: true }), 150); });
   document.querySelectorAll('#mode button').forEach(b => b.addEventListener('click', () => { cfg.mode = b.dataset.m; paintSetup(); saveCfg(); }));
   $('custom').addEventListener('input', () => { cfg.custom = $('custom').value; saveCfg(); });
   $('custom').addEventListener('blur', () => { const a = parseCustom(cfg.custom); if (a.length) { cfg.custom = a.map(fmtMin).join(', '); paintSetup(); saveCfg(); } });
@@ -362,7 +362,7 @@ const audio = {
     }
     if (cfg.music) return;
     if (!this.keep) {
-      const rate = 8000, n = rate * 2, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+      const rate = 8000, n = rate * 10, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
       const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
       w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true);
       v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
@@ -385,20 +385,35 @@ const audio = {
     const ab = await r.arrayBuffer();
     return (this.bufs[id] = await new Promise((res, rej) => this.ctx.decodeAudioData(ab, res, rej)));
   },
-  stopPlaying() { this.playing.forEach(s => { try { s.stop(); } catch (e) {} }); this.playing = []; }
+  stopPlaying() {
+    this.playing.forEach(s => { try { s.stop(); } catch (e) {} }); this.playing = [];
+    if (this.voiceEl) { this.voiceEl.onended = null; this.voiceEl.pause(); }
+  },
+  // נגן ההכרזות למצב מוזיקה. נוצר ו"נפתח" בלחיצה על התחלה, כדי שיורשה לנגן גם כשהמסך נעול
+  primeVoiceEl() {
+    if (!this.voiceEl) this.voiceEl = new Audio();
+    this.voiceEl.src = toWav([new Float32Array(2400)], 24000);
+    this.voiceEl.play().catch(() => {});
+  }
 };
 
 // השמעת משפט מורכב מכמה הקלטות. אם משהו חסר – הכל נקרא בקול של הטלפון.
-async function say(keys) {
+async function say(keys, opts = {}) {
   keys = keys.filter(Boolean);
   const text = keys.map(k => k[0] === '#' ? k.slice(1) : CLIPS[k]).join(' ');
-  if (cfg.voice === 'tts' || !audio.ctx || keys.some(k => k[0] === '#')) return speak(text);
+  if (cfg.voice === 'tts' || !audio.ctx || keys.some(k => k[0] === '#')) {
+    if (opts.beep) audio.beep(1175, 260, 0.6);
+    return setTimeout(() => speak(text), opts.beep ? 300 : 0);
+  }
   let bufs;
   try {
     bufs = await Promise.race([Promise.all(keys.map(k => audio.load(k))), new Promise((_, rej) => setTimeout(() => rej('slow'), 2500))]);
   } catch (e) { return speak(text); }
   audio.stopPlaying();
   if (audio.ctx.state === 'suspended') audio.ctx.resume();
+  if (cfg.music && audio.voiceEl) return sayDucked(bufs, opts.beep);
+  if (opts.beep) audio.beep(1175, 260, 0.6);
+  await new Promise(r => setTimeout(r, opts.beep ? 300 : 0));
   const g = audio.ctx.createGain(); g.gain.value = cfg.volume; g.connect(audio.ctx.destination);
   let t = audio.ctx.currentTime + 0.05;
   bufs.forEach(b => {
@@ -406,6 +421,47 @@ async function say(keys) {
     audio.playing.push(s); t += b.duration + 0.08;
   });
 }
+/* מצב מוזיקה: ההכרזה מושמעת כקובץ קצר (מתחת ל-5 שניות) בנגן רגיל.
+   כך אנדרואיד מתייחס אליה כהודעה קצרה ומחליש את ספוטיפיי בזמן שהיא מתנגנת. */
+function toWav(chunks, sr) {
+  const n = chunks.reduce((a, c) => a + c.length, 0), buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+  let o = 44;
+  chunks.forEach(c => { for (let i = 0; i < c.length; i++, o += 2) v.setInt16(o, Math.max(-1, Math.min(1, c[i])) * 32767, true); });
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+function sayDucked(bufs, withBeep) {
+  const sr = bufs[0].sampleRate, sil = s => new Float32Array(Math.round(sr * s));
+  const beep = () => {
+    const a = new Float32Array(Math.round(sr * 0.26));
+    for (let i = 0; i < a.length; i++) a[i] = Math.sin(2 * Math.PI * 1175 * i / sr) * 0.6 * Math.min(1, i / (sr * 0.01)) * Math.exp(-i / (sr * 0.08));
+    return a;
+  };
+  // מחלקים לחלקים של עד 4.5 שניות, כל חלק מתחיל בשקט קצר כדי שהמוזיקה תספיק להיחלש
+  const parts = [];
+  let cur = [sil(0.4)], len = 0.4;
+  if (withBeep) { cur.push(beep(), sil(0.15)); len += 0.41; }
+  bufs.forEach(b => {
+    if (len + b.duration > 4.5 && len > 0.6) { cur.push(sil(0.25)); parts.push(cur); cur = [sil(0.3)]; len = 0.3; }
+    const d = new Float32Array(b.getChannelData(0)); cur.push(d, sil(0.08)); len += b.duration + 0.08;
+  });
+  cur.push(sil(0.25)); parts.push(cur);
+  const el = audio.voiceEl;
+  el.volume = cfg.volume;
+  let i = 0;
+  const playNext = () => {
+    if (i >= parts.length) { el.onended = null; return; }
+    if (el.src.startsWith('blob:')) URL.revokeObjectURL(el.src);
+    el.src = toWav(parts[i++], sr);
+    el.play().catch(() => {});
+  };
+  el.onended = playNext;
+  playNext();
+}
+
 // טעינה מראש של כל ההקלטות של הקול הנבחר (כדי שיעבדו גם בלי אינטרנט)
 function prefetchVoice() {
   if (cfg.voice === 'tts' || store.get('rw.pref.' + cfg.voice, 0)) return;
@@ -436,8 +492,7 @@ function segKeys(seg, i) {
   return [i === 0 ? 'warm' : 'cool', ...durKeys(seg.dur), 'walkw'];
 }
 function announce(seg, i) {
-  audio.beep(1175, 260, 0.6);
-  setTimeout(() => say(segKeys(seg, i)), 300);
+  say(segKeys(seg, i), { beep: true });
   if (cfg.vibe && navigator.vibrate) navigator.vibrate(seg.kind === 'run' ? [300, 120, 300] : [600]);
   setMedia();
 }
@@ -508,6 +563,7 @@ document.addEventListener('visibilitychange', () => {
 
 async function start() {
   audio.unlock(); audio.startKeepAlive();
+  if (cfg.music) audio.primeVoiceEl();
   if (cfg.voice === 'tts') speak(' '); // "פותח" את מנוע הדיבור מתוך לחיצת המשתמש
   W.segs = buildSegments(cfg); W.n = runsOf(cfg).length;
   W.total = W.segs.reduce((a, s) => a + s.dur, 0);
