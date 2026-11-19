@@ -45,8 +45,6 @@
   for (let m = 1; m <= 30; m++) C['m' + m + 'h'] = minW(m) + ' וחצי.';
   for (let n = 2; n <= 40; n++) { C['r' + n] = 'סיבוב ' + heb(n); C['of' + n] = 'מתוך ' + heb(n) + '.'; }
 
-  for (let n = 1; n <= 42; n++) C['km' + n] = 'קילומטר ' + heb(n) + '.';
-
-  const api ={ CLIPS: C, heb };
+  const api = { CLIPS: C, heb };
   if (typeof module !== 'undefined') module.exports = api; else window.RW_CLIPS = api;
 })();
