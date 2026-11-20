@@ -143,6 +143,16 @@
   <button class="btn ghost small danger" id="hist-clear">מחיקת כל הריצות</button>
 </section>
 
+<!-- הזנת מרחק לריצה -->
+<dialog id="dist-dlg" class="ed">
+  <h3 id="dist-title">📏 מרחק</h3>
+  <label class="ed-f">כמה קילומטרים עשית? (כולל ההליכות)
+    <input id="dist-in" class="txt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="למשל 5.2"></label>
+  <div class="ed-sum" id="dist-pace"></div>
+  <div class="ed-btns"><button class="btn go" id="dist-save">שמירה</button><button class="btn ghost" id="dist-cancel">ביטול</button></div>
+  <button class="btn ghost small danger" id="dist-del">מחיקת המרחק</button>
+</dialog>
+
 <!-- עורך אימון בתוכנית -->
 <dialog id="ed" class="ed">
   <h3 id="ed-title">עריכת אימון</h3>

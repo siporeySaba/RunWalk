@@ -642,8 +642,10 @@ function finish(completed) {
   if (W.lock) { W.lock.release().catch(() => {}); W.lock = null; }
   document.body.className = ''; document.title = 'ריצה והליכה';
 
+  W.lastAt = null;
   if (e > 30) {
-    h.unshift({ at: Date.now(), total: Math.round(e), run: runSec, rounds: roundsDone, of: W.n, plan: planLabel(W.plan), done: completed, maxSeg });
+    W.lastAt = Date.now();
+    h.unshift({ at: W.lastAt, total: Math.round(e), run: runSec, rounds: roundsDone, of: W.n, plan: planLabel(W.plan), done: completed, maxSeg });
     store.set('rw.history', h.slice(0, 300));
   }
   $('done-title').textContent = completed ? 'כל הכבוד! 🎉' : 'האימון נעצר';
@@ -654,10 +656,62 @@ function finish(completed) {
     <div class="row"><span>זמן כולל</span><b>${fmt(e)}</b></div>
     <div class="row"><span>זמן ריצה</span><b>${fmt(runSec)}</b></div>
     <div class="row"><span>סיבובים שהושלמו</span><b>${roundsDone} מתוך ${W.n}</b></div>
-    <div class="row"><span>תוכנית</span><b>${planLabel(W.plan)}</b></div>`;
+    <div class="row"><span>תוכנית</span><b>${planLabel(W.plan)}</b></div>
+    <div id="done-dist"></div>`;
+  paintDoneDist();
   paintHistory(); paintStats(); paintProgCard();
   show('done');
 }
+/* ---------- מרחק וקצב (מוזנים ידנית, למשל מהשעון) ---------- */
+const findRun = at => store.get('rw.history', []).find(r => r.at === at);
+const paceOf = r => r.dist ? r.total / r.dist : 0;           // שניות לק״מ, על כל זמן האימון
+const fmtPace = s => s ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : '–';
+const fmtKm = km => (+km).toFixed(2).replace(/\.?0+$/, '');
+function paintDoneDist() {
+  const box = $('done-dist'); if (!box) return;
+  const r = W.lastAt && findRun(W.lastAt);
+  if (!r) { box.innerHTML = ''; return; }
+  box.innerHTML = r.dist
+    ? `<div class="row"><span>📏 מרחק</span><b>${fmtKm(r.dist)} ק״מ</b></div>
+       <div class="row"><span>⏱️ קצב ממוצע</span><b>${fmtPace(paceOf(r))} לק״מ</b></div>
+       <button class="btn ghost small" id="dist-edit-done">✏️ עריכת המרחק</button>`
+    : `<button class="btn small dist-add" id="dist-edit-done">📏 הוספת מרחק (מהשעון)</button>`;
+  $('dist-edit-done').onclick = () => openDist(r.at);
+}
+let distAt = null;
+function openDist(at) {
+  const r = findRun(at); if (!r) return;
+  distAt = at;
+  const d = new Date(r.at);
+  $('dist-title').textContent = `📏 מרחק · ${d.getDate()}.${d.getMonth() + 1} · ${fmt(r.total)}`;
+  $('dist-in').value = r.dist ? fmtKm(r.dist) : '';
+  $('dist-del').hidden = !r.dist;
+  distPreview();
+  $('dist-dlg').showModal();
+  setTimeout(() => $('dist-in').focus(), 50);
+}
+function distPreview() {
+  const r = findRun(distAt), km = parseFloat(String($('dist-in').value).replace(',', '.'));
+  $('dist-pace').innerHTML = r && km > 0
+    ? `קצב ממוצע: <b>${fmtPace(r.total / km)} לק״מ</b> · ${(km / (r.total / 3600)).toFixed(1)} קמ״ש`
+    : 'הקצב יחושב לבד לפי זמן האימון';
+}
+function saveDist(km) {
+  const h = store.get('rw.history', []), r = h.find(x => x.at === distAt);
+  if (!r) return;
+  if (km > 0) r.dist = Math.round(km * 100) / 100; else delete r.dist;
+  store.set('rw.history', h);
+  $('dist-dlg').close(); paintDoneDist(); paintHistory(); paintStats();
+}
+$('dist-in').addEventListener('input', distPreview);
+$('dist-save').addEventListener('click', () => {
+  const km = parseFloat(String($('dist-in').value).replace(',', '.'));
+  if (!(km > 0 && km < 200)) { $('dist-in').focus(); return; }
+  saveDist(km);
+});
+$('dist-del').addEventListener('click', () => saveDist(0));
+$('dist-cancel').addEventListener('click', () => $('dist-dlg').close());
+
 function weekStart(t) { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - d.getDay()); return d.getTime(); }
 function paintStats() {
   const h = store.get('rw.history', []);
@@ -671,6 +725,8 @@ function paintStats() {
   if (!weeks.has(w)) w -= 7 * 864e5;
   while (weeks.has(w)) { streak++; w = weekStart(w - 3 * 864e5); }
   const b = bests(h);
+  const wkKm = wk.reduce((a, r) => a + (r.dist || 0), 0), allKm = h.reduce((a, r) => a + (r.dist || 0), 0);
+  const paces = h.filter(r => r.dist >= 1).map(paceOf), bestPace = paces.length ? Math.min(...paces) : 0;
   box.innerHTML = `<div class="card stats-card">
     <div class="st-h">📊 הסטטיסטיקה שלי</div>
     <div class="st-grid">
@@ -678,6 +734,7 @@ function paintStats() {
       <div><b>${wk.length}</b><small>אימונים השבוע</small></div>
       <div><b>${streak}</b><small>שבועות ברצף</small></div>
     </div>
+    ${wkKm || allKm ? `<div class="st-km">📏 השבוע: <b>${fmtKm(wkKm)} ק״מ</b> · סה״כ: <b>${fmtKm(allKm)} ק״מ</b>${bestPace ? ` · הקצב הכי טוב: <b>${fmtPace(bestPace)}</b>` : ''}</div>` : ''}
     <div class="st-best">🏅 ריצה רצופה הכי ארוכה: <b>${b.seg ? fmtShort(b.seg) : '–'}</b> · הכי הרבה ריצה באימון: <b>${fmt(b.run)}</b></div>
     <button class="btn ghost small" id="hist-open">🗂️ כל הריצות (${h.length})</button>
   </div>`;
@@ -688,8 +745,10 @@ function paintHistory() {
   const h = store.get('rw.history', []);
   const row = r => {
     const d = new Date(r.at);
-    return `<li><div><b>${d.getDate()}.${d.getMonth() + 1} · ריצה ${fmt(r.run)}${r.done ? ' ✓' : ''}</b><span>${r.plan}</span></div>
-      <button class="mini del" data-at="${r.at}" aria-label="מחיקה">🗑️</button></li>`;
+    return `<li><div><b>${d.getDate()}.${d.getMonth() + 1} · ריצה ${fmt(r.run)}${r.done ? ' ✓' : ''}</b><span>${r.plan}</span>
+      ${r.dist ? `<span class="km">📏 ${fmtKm(r.dist)} ק״מ · ${fmtPace(paceOf(r))} לק״מ</span>` : ''}</div>
+      <div class="li-btns"><button class="mini dist" data-at="${r.at}" aria-label="מרחק">${r.dist ? '✏️' : '📏'}</button>
+      <button class="mini del" data-at="${r.at}" aria-label="מחיקה">🗑️</button></div></li>`;
   };
   const empty = '<li><span>עוד אין ריצות שמורות</span></li>';
   $('history').innerHTML = h.slice(0, 5).map(row).join('') || empty;
@@ -700,6 +759,7 @@ function paintHistory() {
     store.set('rw.history', store.get('rw.history', []).filter(r => String(r.at) !== b.dataset.at));
     paintHistory(); paintStats();
   }));
+  document.querySelectorAll('.history .dist').forEach(b => b.addEventListener('click', () => openDist(+b.dataset.at)));
 }
 $('hist-back').addEventListener('click', () => show('setup'));
 $('hist-clear').addEventListener('click', () => {
