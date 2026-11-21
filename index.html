@@ -62,6 +62,17 @@
       <div class="stepper" data-key="cooldown"></div>
     </div>
     <div class="row">
+      <div class="lbl">⏳ ספירה לפני ההתחלה</div>
+      <select id="countdown" class="sel">
+        <option value="0">בלי</option>
+        <option value="5">5 שניות</option>
+        <option value="10">10 שניות</option>
+        <option value="15">15 שניות</option>
+        <option value="20">20 שניות</option>
+        <option value="30">30 שניות</option>
+      </select>
+    </div>
+    <div class="row">
       <div class="lbl">🎙️ קול</div>
       <select id="voice" class="sel">
         <option value="avri">אבי (גבר)</option>
@@ -72,8 +83,8 @@
     <label class="tgl"><input type="checkbox" id="music"> 🎵 אני שומע מוזיקה / פודקאסט בזמן הריצה</label>
     <p class="hint left">במצב מוזיקה ההכרזות מתנגנות מעל המוזיקה בלי לעצור אותה, אבל כפתור העצירה באוזניות לא שולט בטיימר.</p>
     <label class="tgl"><input type="checkbox" id="cue-cheer"> 💪 משפטי עידוד בחצי השני של האימון</label>
-    <label class="tgl"><input type="checkbox" id="cue-half"> הכרזה באמצע כל קטע ("חצי עבר")</label>
-    <label class="tgl"><input type="checkbox" id="cue-min"> הכרזה "עוד דקה" לפני סוף קטע</label>
+    <label class="tgl"><input type="checkbox" id="cue-half"> הכרזה באמצע כל ריצה ("חצי עבר")</label>
+    <label class="tgl"><input type="checkbox" id="cue-min"> 🔔 בדקה האחרונה של ריצה: צליל מיוחד ו"דקה אחרונה"</label>
     <label class="tgl"><input type="checkbox" id="cue-count"> צפצופים ב-3 השניות האחרונות</label>
     <label class="tgl"><input type="checkbox" id="cue-round"> להגיד "סיבוב X מתוך Y"</label>
     <label class="tgl"><input type="checkbox" id="cue-vibe"> רטט בכל החלפה</label>

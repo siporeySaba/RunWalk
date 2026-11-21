@@ -10,7 +10,7 @@ const store = {
 
 const DEFAULTS = {
   mode: 'fixed', run: 300, walk: 60, rounds: 6, custom: '3, 5, 7, 5, 3', warmup: 0, cooldown: 0,
-  half: false, min: true, count: true, round: true, vibe: true, cheer: true,
+  halfRun: true, countdown: 10, min: true, count: true, round: true, vibe: true, cheer: true,
   voice: 'avri', music: false, volume: 1, showProg: true
 };
 const cfg = Object.assign({}, DEFAULTS, store.get('rw.cfg', {}));
@@ -161,7 +161,7 @@ function paintSetup() {
   document.body.classList.toggle('custom-mode', cfg.mode === 'custom');
   if (document.activeElement !== $('custom')) $('custom').value = cfg.custom;
 }
-const TOGGLES = { 'cue-half': 'half', 'cue-min': 'min', 'cue-count': 'count', 'cue-round': 'round', 'cue-vibe': 'vibe', 'cue-cheer': 'cheer', 'music': 'music' };
+const TOGGLES = { 'cue-half': 'halfRun', 'cue-min': 'min', 'cue-count': 'count', 'cue-round': 'round', 'cue-vibe': 'vibe', 'cue-cheer': 'cheer', 'music': 'music' };
 function bindSettings() {
   for (const [id, k] of Object.entries(TOGGLES)) {
     $(id).checked = cfg[k];
@@ -169,6 +169,8 @@ function bindSettings() {
   }
   $('volume').value = cfg.volume;
   $('volume').addEventListener('input', () => { cfg.volume = +$('volume').value; saveCfg(); });
+  $('countdown').value = cfg.countdown;
+  $('countdown').addEventListener('change', () => { cfg.countdown = +$('countdown').value; saveCfg(); });
   $('voice').value = cfg.voice;
   $('voice').addEventListener('change', () => { cfg.voice = $('voice').value; saveCfg(); voiceHint(); prefetchVoice(); });
   $('test-voice').addEventListener('click', () => { audio.unlock(); if (cfg.music) audio.primeVoiceEl(); setTimeout(() => say(['test'], { beep: true }), 150); });
@@ -351,6 +353,15 @@ const audio = {
     g.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
     o.connect(g); g.connect(this.ctx.destination); o.start(t); o.stop(t + ms / 1000 + 0.05);
   },
+  // צליל מוכן מראש: 'beep' לפני הכרזה, 'chime' (שלושה צלילים עולים) לדקה האחרונה
+  tone(kind) {
+    if (!this.ctx) return;
+    const d = toneData(kind, this.ctx.sampleRate), b = this.ctx.createBuffer(1, d.length, this.ctx.sampleRate);
+    b.getChannelData(0).set(d);
+    const s = this.ctx.createBufferSource(), g = this.ctx.createGain();
+    s.buffer = b; g.gain.value = cfg.volume; s.connect(g); g.connect(this.ctx.destination); s.start();
+    this.playing.push(s);
+  },
   // רעש זעיר בלולאה שלא שומעים – שומר את הדף "פעיל" כשהמסך נעול.
   // ב"מצב מוזיקה" לא מפעילים נגן מדיה, כדי לא לעצור את ספוטיפיי וכו'.
   startKeepAlive() {
@@ -398,12 +409,25 @@ const audio = {
 };
 
 // השמעת משפט מורכב מכמה הקלטות. אם משהו חסר – הכל נקרא בקול של הטלפון.
+const TONES = {
+  beep: { len: 0.26, notes: [[1175, 0]], decay: 0.08, gain: 0.6 },
+  chime: { len: 0.95, notes: [[784, 0], [1047, 0.17], [1568, 0.34]], decay: 0.2, gain: 0.42 }
+};
+function toneData(kind, sr) {
+  const T = TONES[kind], a = new Float32Array(Math.round(sr * T.len));
+  T.notes.forEach(([f, at]) => {
+    for (let i = Math.round(at * sr), j = 0; i < a.length; i++, j++)
+      a[i] += Math.sin(2 * Math.PI * f * j / sr) * T.gain * Math.min(1, j / (sr * 0.01)) * Math.exp(-j / (sr * T.decay));
+  });
+  return a;
+}
 async function say(keys, opts = {}) {
   keys = keys.filter(Boolean);
+  const tone = opts.tone || (opts.beep ? 'beep' : null), wait = tone ? (TONES[tone].len + 0.05) * 1000 : 0;
   const text = keys.map(k => k[0] === '#' ? k.slice(1) : CLIPS[k]).join(' ');
   if (cfg.voice === 'tts' || !audio.ctx || keys.some(k => k[0] === '#')) {
-    if (opts.beep) audio.beep(1175, 260, 0.6);
-    return setTimeout(() => speak(text), opts.beep ? 300 : 0);
+    if (tone) audio.tone(tone);
+    return setTimeout(() => speak(text), wait);
   }
   let bufs;
   try {
@@ -411,9 +435,9 @@ async function say(keys, opts = {}) {
   } catch (e) { return speak(text); }
   audio.stopPlaying();
   if (audio.ctx.state === 'suspended') audio.ctx.resume();
-  if (cfg.music && audio.voiceEl) return sayDucked(bufs, opts.beep);
-  if (opts.beep) audio.beep(1175, 260, 0.6);
-  await new Promise(r => setTimeout(r, opts.beep ? 300 : 0));
+  if (cfg.music && audio.voiceEl) return sayDucked(bufs, tone);
+  if (tone) audio.tone(tone);
+  await new Promise(r => setTimeout(r, wait));
   const g = audio.ctx.createGain(); g.gain.value = cfg.volume; g.connect(audio.ctx.destination);
   let t = audio.ctx.currentTime + 0.05;
   bufs.forEach(b => {
@@ -433,17 +457,12 @@ function toWav(chunks, sr) {
   chunks.forEach(c => { for (let i = 0; i < c.length; i++, o += 2) v.setInt16(o, Math.max(-1, Math.min(1, c[i])) * 32767, true); });
   return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
 }
-function sayDucked(bufs, withBeep) {
+function sayDucked(bufs, tone) {
   const sr = bufs[0].sampleRate, sil = s => new Float32Array(Math.round(sr * s));
-  const beep = () => {
-    const a = new Float32Array(Math.round(sr * 0.26));
-    for (let i = 0; i < a.length; i++) a[i] = Math.sin(2 * Math.PI * 1175 * i / sr) * 0.6 * Math.min(1, i / (sr * 0.01)) * Math.exp(-i / (sr * 0.08));
-    return a;
-  };
   // מחלקים לחלקים של עד 4.5 שניות, כל חלק מתחיל בשקט קצר כדי שהמוזיקה תספיק להיחלש
   const parts = [];
   let cur = [sil(0.4)], len = 0.4;
-  if (withBeep) { cur.push(beep(), sil(0.15)); len += 0.41; }
+  if (tone) { cur.push(toneData(tone, sr), sil(0.15)); len += TONES[tone].len + 0.15; }
   bufs.forEach(b => {
     if (len + b.duration > 4.5 && len > 0.6) { cur.push(sil(0.25)); parts.push(cur); cur = [sil(0.3)]; len = 0.3; }
     const d = new Float32Array(b.getChannelData(0)); cur.push(d, sil(0.08)); len += b.duration + 0.08;
@@ -464,11 +483,11 @@ function sayDucked(bufs, withBeep) {
 
 // טעינה מראש של כל ההקלטות של הקול הנבחר (כדי שיעבדו גם בלי אינטרנט)
 function prefetchVoice() {
-  if (cfg.voice === 'tts' || store.get('rw.pref.' + cfg.voice, 0)) return;
+  if (cfg.voice === 'tts' || store.get('rw.pref.' + cfg.voice + '.' + Object.keys(CLIPS).length, 0)) return;
   const keys = Object.keys(CLIPS), v = cfg.voice;
   let i = 0, bad = 0;
   const next = () => {
-    if (i >= keys.length) { if (!bad) store.set('rw.pref.' + v, 1); return; }
+    if (i >= keys.length) { if (!bad) store.set('rw.pref.' + v + '.' + keys.length, 1); return; }
     const batch = keys.slice(i, i += 12);
     Promise.all(batch.map(k => fetch(`clips/${v}/${k}.mp3`).then(r => { if (!r.ok) bad++; }, () => { bad++; })))
       .then(() => bad ? null : setTimeout(next, 150));
@@ -486,13 +505,13 @@ function segKeys(seg, i) {
   if (seg.kind === 'run') {
     const k = [];
     if (cfg.round && W.n > 1) k.push(...(last ? ['rlast'] : seg.round === 1 ? ['r1', 'of' + W.n] : ['r' + seg.round, 'of' + W.n]));
-    return [...k, 'now_run', ...durKeys(seg.dur)];
+    return [...k, 'run_of', ...durKeys(seg.dur)];
   }
   if (seg.kind === 'walk') return ['now_walk', ...durKeys(seg.dur), last ? 'last_seg' : ''];
   return [i === 0 ? 'warm' : 'cool', ...durKeys(seg.dur), 'walkw'];
 }
 function announce(seg, i) {
-  say(segKeys(seg, i), { beep: true });
+  say([i === 0 && W.cd ? 'go' : '', ...segKeys(seg, i)], { beep: true });
   if (cfg.vibe && navigator.vibrate) navigator.vibrate(seg.kind === 'run' ? [300, 120, 300] : [600]);
   setMedia();
 }
@@ -505,6 +524,7 @@ const crossed = (remain, mark) => remain <= mark && remain > mark - 3;
 
 function tick() {
   const e = elapsed();
+  if (e < 0) return tickPre(-e);
   if (e >= W.total) return finish(true);
   let i = W.idx < 0 ? 0 : W.idx;
   while (i < W.segs.length - 1 && e >= W.segs[i + 1].start) i++;
@@ -513,18 +533,43 @@ function tick() {
   const remain = seg.start + seg.dur - e;
 
   if (!W.pausedAt) {
-    if (cfg.half && seg.dur >= 120 && !W.cue.half && crossed(remain, seg.dur / 2)) { W.cue.half = 1; say(['half']); }
+    // חצי עבר: בכל ריצה, גם קצרה. לא בהליכה
+    if (cfg.halfRun && seg.kind === 'run' && !W.cue.half && crossed(remain, seg.dur / 2)) { W.cue.half = 1; say(['half']); }
     // עידוד: בריצות של 2 דקות ומעלה, בחצי השני של האימון
     if (cfg.cheer && seg.kind === 'run' && seg.dur >= 120 && !W.cue.cheer && (seg.round > W.n / 2 || seg.round === W.n) && crossed(remain, seg.dur * 0.62)) {
       W.cue.cheer = 1; say([cheerKey(seg)]);
     }
-    if (cfg.min && seg.dur >= 180 && !W.cue.min && crossed(remain, 60)) { W.cue.min = 1; say(['one_min']); }
+    // דקה אחרונה של ריצה: צליל מיוחד + "דקה אחרונה". בהליכות ארוכות רק "עוד דקה"
+    if (cfg.min && !W.cue.min && crossed(remain, 60)) {
+      if (seg.kind === 'run' && seg.dur > 120) {
+        W.cue.min = 1; say(['last_min'], { tone: 'chime' });
+        if (cfg.vibe && navigator.vibrate) navigator.vibrate([90, 70, 90, 70, 90]);
+      } else if (seg.kind !== 'run' && seg.dur >= 180) { W.cue.min = 1; say(['one_min']); }
+    }
     if (cfg.count) {
       const s = Math.ceil(remain);
       if (s <= 3 && s >= 1 && W.cue.cnt !== s) { W.cue.cnt = s; audio.beep(660, 120, 0.45); }
     }
   }
   paintRun(seg, i, remain, e);
+}
+
+// ספירה לאחור לפני ההתחלה – זמן להכניס את הטלפון לכיס
+function tickPre(left) {
+  if (!W.pausedAt) {
+    if (!W.cue.pre) { W.cue.pre = 1; if (left > 4) say(['cd' + W.cd]); }
+    const s = Math.ceil(left);
+    if (s <= 3 && s >= 1 && W.cue.cnt !== s) { W.cue.cnt = s; say(['n' + s]); if (cfg.vibe && navigator.vibrate) navigator.vibrate(80); }
+  }
+  document.body.className = W.pausedAt ? 'paused' : 'ph-easy';
+  $('phase').textContent = W.pausedAt ? '⏸ בהפסקה' : '⏳ מתחילים בעוד';
+  $('clock').textContent = Math.ceil(left);
+  const f = W.segs[0];
+  $('next').textContent = `ראשון: ${f.label} ${fmtShort(f.dur)}`;
+  $('seg-bar').style.width = (100 * (1 - left / W.cd)) + '%';
+  $('all-bar').style.width = '0%';
+  $('round').textContent = '–'; $('elapsed').textContent = fmt(0); $('left').textContent = fmt(W.total);
+  document.title = 'מתחילים בעוד ' + Math.ceil(left);
 }
 
 function paintRun(seg, i, remain, e) {
@@ -572,12 +617,13 @@ async function start() {
   // טוענים מראש את כל ההקלטות של האימון
   if (cfg.voice !== 'tts') {
     $('start').textContent = '⏳ טוען קול...';
-    const keys = new Set(['half', 'one_min', 'pause', 'resume', 'done', 'ran', 'record', 'prog_done', 'cheer_last', 'cheer1', 'cheer2', 'cheer3', 'cheer4', 'cheer5', 'cheer6', 'cheer7']);
+    const keys = new Set(['half', 'one_min', 'last_min', 'go', 'n1', 'n2', 'n3', cfg.countdown ? 'cd' + cfg.countdown : 'go', 'pause', 'resume', 'done', 'ran', 'record', 'prog_done', 'cheer_last', 'cheer1', 'cheer2', 'cheer3', 'cheer4', 'cheer5', 'cheer6', 'cheer7']);
     W.idx = -1; W.segs.forEach((s, i) => segKeys(s, i).forEach(k => k && k[0] !== '#' && keys.add(k)));
     await Promise.race([Promise.all([...keys].map(k => audio.load(k).catch(() => {}))), new Promise(r => setTimeout(r, 4000))]);
     $('start').textContent = '▶ התחלה';
   }
-  W.t0 = now(); W.pausedAt = 0; W.pausedMs = 0; W.idx = -1; W.cue = {};
+  W.cd = [5, 10, 15, 20, 30].includes(cfg.countdown) ? cfg.countdown : 0;
+  W.t0 = now() + W.cd * 1000; W.pausedAt = 0; W.pausedMs = 0; W.idx = -1; W.cue = {};
   show('run');
   wakeLock();
   clearInterval(W.timer); W.timer = setInterval(tick, 250);
@@ -616,6 +662,11 @@ function bests(h) {
 }
 function finish(completed) {
   clearInterval(W.timer); W.timer = null;
+  if (elapsed() <= 0) { // נעצר עוד בספירה לאחור – לא נרשם כלום
+    audio.stopPlaying(); audio.stopKeepAlive();
+    if (W.lock) { W.lock.release().catch(() => {}); W.lock = null; }
+    document.body.className = ''; document.title = 'ריצה והליכה'; paintSetup(); return show('setup');
+  }
   const e = Math.min(elapsed(), W.total);
   let runSec = 0, roundsDone = 0, maxSeg = 0;
   W.segs.forEach(s => {
