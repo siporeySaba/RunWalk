@@ -617,7 +617,7 @@ async function start() {
   // טוענים מראש את כל ההקלטות של האימון
   if (cfg.voice !== 'tts') {
     $('start').textContent = '⏳ טוען קול...';
-    const keys = new Set(['half', 'one_min', 'last_min', 'go', 'n1', 'n2', 'n3', cfg.countdown ? 'cd' + cfg.countdown : 'go', 'pause', 'resume', 'done', 'ran', 'record', 'prog_done', 'cheer_last', 'cheer1', 'cheer2', 'cheer3', 'cheer4', 'cheer5', 'cheer6', 'cheer7']);
+    const keys = new Set(['plus30', 'half', 'one_min', 'last_min', 'go', 'n1', 'n2', 'n3', cfg.countdown ? 'cd' + cfg.countdown : 'go', 'pause', 'resume', 'done', 'ran', 'record', 'prog_done', 'cheer_last', 'cheer1', 'cheer2', 'cheer3', 'cheer4', 'cheer5', 'cheer6', 'cheer7']);
     W.idx = -1; W.segs.forEach((s, i) => segKeys(s, i).forEach(k => k && k[0] !== '#' && keys.add(k)));
     await Promise.race([Promise.all([...keys].map(k => audio.load(k).catch(() => {}))), new Promise(r => setTimeout(r, 4000))]);
     $('start').textContent = '▶ התחלה';
@@ -645,6 +645,19 @@ function togglePause() {
     W.pausedAt = now(); $('pause').textContent = '▶ המשך'; say(['pause']);
   }
   setMedia(); tick();
+}
+// עוד חצי דקה לקטע הנוכחי (ריצה או הליכה). כל מה שאחריו זז קדימה
+function addTime(sec = 30) {
+  if (!W.timer) return;
+  if (elapsed() < 0) { W.t0 += sec * 1000; W.cd += sec; return tick(); }
+  const seg = W.segs[W.idx];
+  if (!seg) return;
+  seg.dur += sec; W.total += sec;
+  W.segs.slice(W.idx + 1).forEach(s => { s.start += sec; });
+  delete W.cue.min; delete W.cue.cnt;
+  say(['plus30']);
+  if (cfg.vibe && navigator.vibrate) navigator.vibrate(60);
+  tick();
 }
 function skip() {
   if (!W.timer || W.idx >= W.segs.length - 1) return;
@@ -826,6 +839,7 @@ function show(id) {
 $('start').addEventListener('click', start);
 $('pause').addEventListener('click', togglePause);
 $('skip').addEventListener('click', skip);
+$('plus').addEventListener('click', () => addTime(30));
 $('stop').addEventListener('click', () => { if (confirm('לסיים את האימון?')) finish(false); });
 $('again').addEventListener('click', () => show('setup'));
 

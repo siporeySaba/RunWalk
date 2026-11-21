@@ -1,4 +1,4 @@
-const CACHE = 'runwalk-v7';
+const CACHE = 'runwalk-v8';
 const CLIP_CACHE = 'runwalk-clips-v1'; // הקלטות הקול – נשמרות גם בין עדכונים
 const SHELL = ['./', './index.html', './style.css', './app.js', './clips.js', './manifest.json',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-512-maskable.png'];

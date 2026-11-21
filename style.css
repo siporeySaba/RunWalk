@@ -76,8 +76,9 @@ body.paused { background: #475569; }
 .stats div { background: rgba(0,0,0,.2); border-radius: 14px; padding: 10px 4px; }
 .stats span { display: block; font-size: 28px; font-weight: 900; font-variant-numeric: tabular-nums; }
 .stats small { opacity: .8; font-size: 15px; }
-.ctrls { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; margin-top: 18px; }
+.ctrls { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 10px; margin-top: 18px; }
 .ctrls .btn { margin: 0; }
+.btn.plus { background: rgba(255,255,255,.22); font-size: 22px; }
 .ctrls .ghost { border-color: rgba(255,255,255,.5); }
 .lock { color: rgba(255,255,255,.75); }
 
