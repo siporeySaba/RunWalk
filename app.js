@@ -436,8 +436,12 @@ async function say(keys, opts = {}) {
   audio.stopPlaying();
   if (audio.ctx.state === 'suspended') audio.ctx.resume();
   if (cfg.music && audio.voiceEl) return sayDucked(bufs, tone);
+  playBufs(bufs, tone);
+}
+// השמעה ישירה (WebAudio) – עובדת תמיד, גם כשהמסך כבוי, אבל לא מחלישה את המוזיקה
+async function playBufs(bufs, tone) {
   if (tone) audio.tone(tone);
-  await new Promise(r => setTimeout(r, wait));
+  await new Promise(r => setTimeout(r, tone ? (TONES[tone].len + 0.05) * 1000 : 0));
   const g = audio.ctx.createGain(); g.gain.value = cfg.volume; g.connect(audio.ctx.destination);
   let t = audio.ctx.currentTime + 0.05;
   bufs.forEach(b => {
@@ -475,10 +479,19 @@ function sayDucked(bufs, tone) {
     if (i >= parts.length) { el.onended = null; return; }
     if (el.src.startsWith('blob:')) URL.revokeObjectURL(el.src);
     el.src = toWav(parts[i++], sr);
-    el.play().catch(() => {});
+    el.play().catch(() => fallback());
   };
   el.onended = playNext;
+  // אם הנגן לא מתחיל לנגן (קורה כשהמסך כבוי) – משמיעים ישירות, שלא נפספס הכרזה
+  let started = false, fell = false; const id = audio.sayId = (audio.sayId || 0) + 1;
+  const fallback = () => {
+    if (started || fell || id !== audio.sayId) return;
+    fell = true; el.onended = null; el.onplaying = null; el.pause();
+    playBufs(bufs, tone);
+  };
+  el.onplaying = () => { if (fell) el.pause(); else started = true; };
   playNext();
+  setTimeout(fallback, 900);
 }
 
 // טעינה מראש של כל ההקלטות של הקול הנבחר (כדי שיעבדו גם בלי אינטרנט)
